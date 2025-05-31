@@ -1,8 +1,8 @@
 # src/core/vector_store_interface.py
 import psycopg2
-from psycopg2.extensions import AsIs # Quan trọng cho query pgvector
+from psycopg2.extensions import AsIs
 from src.config import settings
-from src.core.embedding_manager import encode_text # Sử dụng hàm encode tập trung
+from src.core.embedding_manager import encode_text
 
 def get_db_connection():
     try:
@@ -23,13 +23,12 @@ def retrieve_relevant_documents_from_db(
     top_k: int = 3,
     table_name: str = settings.CHUNK_TABLE_NAME
 ) -> list[dict]:
-    query_embedding = encode_text(query_text) # Dùng hàm encode
+    query_embedding = encode_text(query_text)
     conn = get_db_connection()
     if not conn: return []
     retrieved_items = []
     try:
         with conn.cursor() as cur:
-            # Sử dụng AsIs cho tên bảng và vector
             cur.execute(
                 """
                 SELECT chunk_text, document_name, page_number, lesson_identifier
@@ -51,7 +50,7 @@ def retrieve_relevant_documents_from_db(
 
 def find_precise_definitional_source_from_db(
     japanese_term: str,
-    table_name: str = settings.CHUNK_TABLE_NAME # Hoặc một bảng chuyên biệt hơn
+    table_name: str = settings.CHUNK_TABLE_NAME
 ) -> dict | None:
     if not japanese_term: return None
     targeted_query = f"Định nghĩa và vị trí của từ tiếng Nhật: {japanese_term}"
