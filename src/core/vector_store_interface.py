@@ -5,6 +5,7 @@ from src.config import settings
 from src.core.embedding_manager import encode_text
 
 def get_db_connection():
+    # ... (giữ nguyên hàm này) ...
     try:
         conn = psycopg2.connect(
             host=settings.DB_HOST,
@@ -21,7 +22,8 @@ def get_db_connection():
 def retrieve_relevant_documents_from_db(
     query_text: str,
     top_k: int = 3,
-    table_name: str = settings.CHUNK_TABLE_NAME
+    # SỬA Ở ĐÂY: Dùng tên biến đã chuẩn hóa
+    table_name: str = settings.RAG_CONTENT_CHUNK_TABLE
 ) -> list[dict]:
     query_embedding = encode_text(query_text)
     conn = get_db_connection()
@@ -29,9 +31,10 @@ def retrieve_relevant_documents_from_db(
     retrieved_items = []
     try:
         with conn.cursor() as cur:
+            # Sử dụng AsIs cho tên bảng để tránh SQL injection từ tên bảng
             cur.execute(
                 """
-                SELECT chunk_text, document_name, page_number, lesson_identifier
+                SELECT chunk_text, document_name, page_number, external_lesson_detail_id AS lesson
                 FROM %s ORDER BY embedding <=> %s LIMIT %s;
                 """,
                 (AsIs(table_name), AsIs(f"'{query_embedding}'"), top_k)
@@ -50,8 +53,10 @@ def retrieve_relevant_documents_from_db(
 
 def find_precise_definitional_source_from_db(
     japanese_term: str,
-    table_name: str = settings.CHUNK_TABLE_NAME
+    # SỬA Ở ĐÂY: Dùng tên biến đã chuẩn hóa
+    table_name: str = settings.RAG_CONTENT_CHUNK_TABLE
 ) -> dict | None:
+    # ... (giữ nguyên logic hàm này) ...
     if not japanese_term: return None
     targeted_query = f"Định nghĩa và vị trí của từ tiếng Nhật: {japanese_term}"
     definitional_chunks = retrieve_relevant_documents_from_db(targeted_query, top_k=1, table_name=table_name)
