@@ -1,11 +1,10 @@
 # src/core/vector_store_interface.py
 import psycopg2
-from psycopg2.extensions import AsIs
+from psycopg2.sql import SQL, Identifier, Literal
 from src.config import settings
 from src.core.embedding_manager import encode_text
 
 def get_db_connection():
-    # ... (giữ nguyên hàm này) ...
     try:
         conn = psycopg2.connect(
             host=settings.DB_HOST,
@@ -19,36 +18,73 @@ def get_db_connection():
         print(f"Database connection error: {e}")
         return None
 
+
 def retrieve_relevant_documents_from_db(
     query_text: str,
     top_k: int = 3,
-    # SỬA Ở ĐÂY: Dùng tên biến đã chuẩn hóa
-    table_name: str = settings.RAG_CONTENT_CHUNK_TABLE
+    table_name: str = "contentchunks", # Sử dụng tên bảng trực tiếp hoặc từ settings
+    filters: dict = None
 ) -> list[dict]:
+    """
+    Truy xuất các tài liệu liên quan từ CSDL với logic xây dựng query đã được sửa lỗi.
+    """
     query_embedding = encode_text(query_text)
+    # Chuyển embedding thành chuỗi string theo định dạng của pgvector
+    embedding_str = str(list(query_embedding))
+
     conn = get_db_connection()
-    if not conn: return []
+    if not conn:
+        return []
+
     retrieved_items = []
+
+    # --- SỬA LỖI LOGIC TẠI ĐÂY ---
+    # 1. Xây dựng mệnh đề WHERE và các tham số của nó một cách riêng biệt
+    where_clauses = []
+    where_params = []
+    if filters:
+        for key, value in filters.items():
+            # Thêm "Identifier(key)" để tránh SQL injection cho tên cột
+            where_clauses.append(SQL("{}=%s").format(Identifier(key)))
+            where_params.append(value)
+
+    where_sql = SQL(" WHERE {}").format(SQL(" AND ").join(where_clauses)) if where_clauses else SQL("")
+
+    # 2. Xây dựng câu truy vấn cuối cùng với các placeholder
+    # Lưu ý: Identifier(table_name) để bảo vệ tên bảng
+    sql_query = SQL("""
+        SELECT chunk_text, source_document_name, original_page_number, level, skill_type, metadata_json
+        FROM {table}
+        {where_clause}
+        ORDER BY embedding <=> %s
+        LIMIT %s;
+    """).format(
+        table=Identifier(table_name),
+        where_clause=where_sql
+    )
+
+    # 3. Kết hợp các tham số theo đúng thứ tự
+    # Thứ tự: [params_for_where, param_for_orderby, param_for_limit]
+    final_params = where_params + [embedding_str, top_k]
+    # --- KẾT THÚC SỬA LỖI ---
+
     try:
         with conn.cursor() as cur:
-            # Sử dụng AsIs cho tên bảng để tránh SQL injection từ tên bảng
-            cur.execute(
-                """
-                SELECT chunk_text, document_name, page_number, external_lesson_detail_id AS lesson
-                FROM %s ORDER BY embedding <=> %s LIMIT %s;
-                """,
-                (AsIs(table_name), AsIs(f"'{query_embedding}'"), top_k)
-            )
+            cur.execute(sql_query, final_params)
             results = cur.fetchall()
             for row in results:
-                retrieved_items.append({
+                 retrieved_items.append({
                     "text": row[0],
-                    "metadata": {"document": row[1], "page": row[2], "lesson": row[3]}
+                    "metadata": {"document": row[1], "page": row[2], "level": row[3], "skill": row[4], "lesson": (row[5] or {}).get('lesson')}
                 })
-    except psycopg2.Error as e:
+    except Exception as e:
+        # In ra câu lệnh và tham số để debug dễ hơn
+        # print("SQL Query Failed:", cur.mogrify(sql_query, final_params).decode())
         print(f"Lỗi truy xuất chunk từ bảng {table_name}: {e}")
     finally:
-        if conn: conn.close()
+        if conn:
+            conn.close()
+
     return retrieved_items
 
 def find_precise_definitional_source_from_db(
@@ -56,7 +92,6 @@ def find_precise_definitional_source_from_db(
     # SỬA Ở ĐÂY: Dùng tên biến đã chuẩn hóa
     table_name: str = settings.RAG_CONTENT_CHUNK_TABLE
 ) -> dict | None:
-    # ... (giữ nguyên logic hàm này) ...
     if not japanese_term: return None
     targeted_query = f"Định nghĩa và vị trí của từ tiếng Nhật: {japanese_term}"
     definitional_chunks = retrieve_relevant_documents_from_db(targeted_query, top_k=1, table_name=table_name)

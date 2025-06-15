@@ -1,81 +1,114 @@
 # main_cli.py
 import sys
 import os
-import json
-import tempfile
 
-# Import các hàm và service cần thiết
+# === IMPORT CÁC MODULE CHỨC NĂNG MỚI ===
 from src.core.rag_services import answer_question
-from src.data_processing.pdf_document_processor import process_pdf_to_chunks, batch_insert_chunks_to_db, \
-    get_db_connection
-from src.data_processing.vocabulary_parser import VocabularyParser  # <-- THÊM IMPORT MỚI
-from src.utils.storage_client import download_file_from_r2
-
+from src.core.quiz_generator import generate_quiz_question
+from src.core.conversational_agent import initialize_planning_agent
 
 def show_help():
-    """Hiển thị hướng dẫn sử dụng."""
-    print("\n--- AgenticRAG CLI Tool ---")
+    """Hiển thị hướng dẫn sử dụng mới."""
+    print("\n--- Trợ lý Học tiếng Nhật CLI ---")
     print("Cách dùng:")
-    print("  python main_cli.py chat                      : Bắt đầu chế độ chat AI.")
-    print("  python main_cli.py process-doc <file_name>   : Tải và xử lý một file tài liệu chung từ R2.")
-    print(
-        "  python main_cli.py parse-vocab <file_name>   : Bóc tách file từ vựng và hiển thị ra JSON.")
-    print("---------------------------\n")
-
+    print("  python main_cli.py chat              : Bắt đầu chế độ chat hỏi-đáp thông thường.")
+    print("  python main_cli.py plan              : Bắt đầu chế độ tư vấn lộ trình học tập.")
+    print("  python main_cli.py quiz <level> [topic] : Tạo câu hỏi (topic là tùy chọn).")
+    print("    Ví dụ 1: python main_cli.py quiz N4")
+    print("    Ví dụ 2: python main_cli.py quiz N3 Business")
+    print("----------------------------------\n")
 
 def run_chat_mode():
-    # ... (giữ nguyên hàm này) ...
-    pass
+    """Chức năng 1: Chat hỏi-đáp thông thường."""
+    print("\n--- Chế độ Hỏi-Đáp ---")
+    print("Bạn có thể hỏi bất cứ điều gì về tiếng Nhật. Gõ 'exit' để thoát.")
+    print("-----------------------\n")
+    while True:
+        try:
+            user_input = input("You: ")
+            if user_input.lower() in ['exit', 'quit', 'bye']:
+                print("AI: Tạm biệt!")
+                break
+            if user_input.strip():
+                ai_response = answer_question(user_input)
+                print(f"AI: {ai_response}\n")
+        except (KeyboardInterrupt, EOFError):
+            print("\nAI: Tạm biệt!")
+            break
 
 
-def run_single_doc_processing(file_name: str):
-    # ... (giữ nguyên hàm này) ...
-    pass
+def run_planning_mode():
+    """Chức năng 3: Tư vấn lộ trình học tập (Agentic)."""
+    print("\n--- Chế độ Tư vấn Lộ trình ---")
+    print("AI sẽ trò chuyện để xây dựng lộ trình. Gõ 'exit' để thoát.")
+    print("Hãy bắt đầu bằng cách chào hoặc nêu yêu cầu của bạn (ví dụ: 'tư vấn cho tôi').")
+    print("--------------------------------\n")
+
+    # Khởi tạo agent và bộ nhớ của nó MỘT LẦN DUY NHẤT
+    agent_executor = initialize_planning_agent()
+    if not agent_executor:
+        print("Không thể khởi tạo Agent. Vui lòng kiểm tra lại cấu hình.")
+        return
+
+    # Bắt đầu vòng lặp hội thoại
+    while True:
+        try:
+            # Chờ người dùng nhập liệu
+            user_input = input("You: ")
+            if user_input.lower() in ['exit', 'quit', 'bye']:
+                print("AI: Tạm biệt! Chúc bạn học tốt.")
+                break
+
+            if user_input.strip():
+                # Gọi agent với input của người dùng
+                # Agent sẽ tự động sử dụng bộ nhớ để truy cập lịch sử hội thoại
+                response = agent_executor.invoke({"input": user_input})
+                print(f"AI: {response['output']}\n")
+
+        except (KeyboardInterrupt, EOFError):
+            print("\nAI: Tạm biệt! Chúc bạn học tốt.")
+            break
+        except Exception as e:
+            print(f"AI: Đã có lỗi xảy ra: {e}")
 
 
-# === THÊM HÀM MỚI ĐỂ PARSE TỪ VỰNG ===
-def run_vocab_parsing(file_name: str):
-    """
-    Điều phối luồng bóc tách cho một file từ vựng cụ thể và in ra JSON.
-    """
-    print(f"\nBắt đầu quy trình bóc tách từ vựng cho file: '{file_name}'")
+def run_quiz_mode(level: str, topic: str = None):
+    """Chức năng 2: Tạo câu hỏi trắc nghiệm với level và topic tùy chọn."""
+    topic_info = f" và chủ đề '{topic}'" if topic else ""
+    print(f"\n--- Chế độ Quiz (Level: {level}{topic_info}) ---")
+    print("Đang tạo câu hỏi cho bạn, vui lòng chờ...")
 
-    project_root_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(project_root_dir, "data", "input_pdfs", file_name)
-
-    # Khởi tạo và sử dụng Parser
-    parser = VocabularyParser()
-    structured_data = parser.parse(file_path)
-
-    # Hiển thị kết quả dưới dạng JSON
-    if structured_data:
-        print("\n--- Kết quả bóc tách (JSON format): ---")
-        # In ra dạng JSON cho dễ đọc, đảm bảo hiển thị đúng tiếng Việt
-        print(json.dumps(structured_data, indent=2, ensure_ascii=False))
-    else:
-        print("Không có dữ liệu nào được trích xuất.")
+    question = generate_quiz_question(level, topic)
+    print("\n" + "="*15 + " CÂU HỎI MỚI " + "="*15)
+    print(question)
+    print("="*42 + "\n")
 
 
-# === CẬP NHẬT LOGIC MAIN ===
 if __name__ == "__main__":
     args = sys.argv
     if len(args) < 2:
         show_help()
-    else:
-        command = args[1]
-        if command == "chat":
-            run_chat_mode()
-        elif command == "process-doc":
-            if len(args) < 3:
-                print("Lỗi: Vui lòng cung cấp tên file cần xử lý.")
-            else:
-                run_single_doc_processing(args[2])
-        # Thêm logic để xử lý lệnh mới
-        elif command == "parse-vocab":
-            if len(args) < 3:
-                print("Lỗi: Vui lòng cung cấp tên file từ vựng cần bóc tách.")
-            else:
-                run_vocab_parsing(args[2])
-        else:
-            print(f"Lỗi: Lệnh '{command}' không được nhận dạng.")
+        exit()
+
+    command = args[1].lower()
+
+    if command == "chat":
+        run_chat_mode()
+    elif command == "plan":
+        run_planning_mode()
+    elif command == "quiz":
+        if len(args) < 3:
+            print("Lỗi: Vui lòng cung cấp ít nhất level (N5, N4, N3...).")
             show_help()
+        else:
+            level_arg = args[2].upper()
+            # Lấy topic nếu có
+            topic_arg = args[3] if len(args) > 3 else None
+
+            if level_arg not in ["N5", "N4", "N3", "N2", "N1"]:
+                 print(f"Lỗi: Level '{level_arg}' không hợp lệ.")
+            else:
+                run_quiz_mode(level_arg, topic_arg)
+    else:
+        print(f"Lỗi: Lệnh '{command}' không được nhận dạng.")
+        show_help()
