@@ -2,7 +2,7 @@ import re
 from langchain_core.output_parsers import StrOutputParser
 
 from src.config import settings
-from src.core.llm_services import get_llm
+from src.core.llm import get_llm
 from src.core.vector_store_interface import (
     retrieve_relevant_documents_from_db,
     find_precise_definitional_source_from_db,
@@ -54,7 +54,7 @@ if llm_instance:
     _main_rag_chain = (
         {
             "context": lambda x: format_docs_for_rag(
-                retrieve_relevant_documents_from_db(x["question_for_rag"], table_name=settings.CHUNK_TABLE_NAME)
+            retrieve_relevant_documents_from_db(x["question_for_rag"], table_name=settings.RAG_CONTENT_CHUNK_TABLE)
             ),
             "question": lambda x: x["original_question"],
             "output_instruction_and_format": lambda x: get_output_instruction_for_rag(
@@ -125,7 +125,7 @@ def answer_question(question: str) -> str:
     if identified_jp_term_for_source_lookup:
         source_metadata = find_precise_definitional_source_from_db(
             identified_jp_term_for_source_lookup,
-            table_name=settings.CHUNK_TABLE_NAME
+            table_name=settings.RAG_CONTENT_CHUNK_TABLE
         )
         if source_metadata:
             doc = source_metadata.get('document', 'tài liệu không rõ')
@@ -148,7 +148,7 @@ def generate_explanation_for_quiz(
     context_for_explanation = "Không tìm thấy ngữ cảnh cụ thể."
     if related_keywords:
         retrieved_docs_data = retrieve_relevant_documents_from_db(
-            f"Thông tin về: {related_keywords}", top_k=1, table_name=settings.CHUNK_TABLE_NAME
+            f"Thông tin về: {related_keywords}", top_k=1, table_name=settings.RAG_CONTENT_CHUNK_TABLE
         )
         if retrieved_docs_data: context_for_explanation = format_docs_for_rag(retrieved_docs_data)
 

@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from src.config import settings
-from src.core.embedding_manager import get_embedding_model
+from src.core.embedding import get_embedding_model
 from src.core.vector_store_interface import get_db_connection
 
 # --- Khởi tạo các đối tượng dùng chung ---

@@ -1,10 +1,10 @@
-# src/core/conversational_agent.py
+
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 
 from src.core.agent_tools import create_full_learning_path
-from src.core.llm_services import get_llm
+from src.core.llm import get_llm
 
 
 def initialize_planning_agent():
@@ -19,8 +19,6 @@ def initialize_planning_agent():
 
     tools = [create_full_learning_path]
 
-    # --- PROMPT MỚI, ĐƠN GIẢN HƠN CHO TOOLS AGENT ---
-    # Prompt này không cần các hướng dẫn định dạng phức tạp của ReAct nữa.
     prompt = ChatPromptTemplate.from_messages([
         ("system",
          """
@@ -39,14 +37,12 @@ def initialize_planning_agent():
          """),
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", "{input}"),
-        # Placeholder này là bắt buộc cho Tools Agent
+
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    # --- SỬ DỤNG HÀM TẠO AGENT MỚI ---
     agent = create_openai_tools_agent(llm_instance, tools, prompt)
 
-    # AgentExecutor vẫn giữ nguyên nhưng giờ sẽ hoạt động với Agent mới
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
     agent_executor = AgentExecutor(
@@ -55,7 +51,6 @@ def initialize_planning_agent():
         memory=memory,
         verbose=True,
         handle_parsing_errors=True,
-        # Giảm max_iterations vì agent mới hiệu quả hơn, không cần lặp nhiều
         max_iterations=5
     )
 

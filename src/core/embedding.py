@@ -1,4 +1,4 @@
-# src/core/embedding_manager.py
+# src/core/embedding.py
 from sentence_transformers import SentenceTransformer
 from src.config import settings
 

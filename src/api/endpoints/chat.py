@@ -1,7 +1,7 @@
 # src/api/endpoints/chat.py
 from fastapi import APIRouter, HTTPException, Body
 from src.api.schemas import ChatRequest, ChatResponse
-from src.core.rag_services import answer_question # Giả sử đây là hàm RAG chính của bạn
+from src.core.rag_services import answer_question
 
 router = APIRouter()
 

@@ -1,4 +1,4 @@
-# src/core/llm_services.py
+# src/core/llm.py
 from langchain_openai import ChatOpenAI
 from src.config import settings
 

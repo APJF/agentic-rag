@@ -3,7 +3,7 @@ import random
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from src.core.llm_services import get_llm
+from src.core.llm import get_llm
 from src.core.vector_store_interface import retrieve_relevant_documents_from_db
 
 # --- Khởi tạo ---
