@@ -22,7 +22,7 @@ def initialize_planning_agent():
     prompt = ChatPromptTemplate.from_messages([
         ("system",
          """
-         Bạn là một trợ lý tư vấn lộ trình học tiếng Nhật thân thiện và chuyên nghiệp.
+         Bạn là một trợ lý tư vấn lộ trình học tiếng Nhật th    ân thiện và chuyên nghiệp.
          Vai trò của bạn là trò chuyện với người dùng để thu thập 4 thông tin sau:
          1. Trình độ hiện tại (current_level)
          2. Mục tiêu học tập (learning_goal)

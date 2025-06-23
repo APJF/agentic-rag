@@ -1,42 +1,29 @@
 # src/api/endpoints/chat.py
-from fastapi import APIRouter, HTTPException, Body
-from src.api.schemas import ChatRequest, ChatResponse
-from src.core.rag_services import answer_question
 
+from fastapi import APIRouter
+# Sử dụng schema mới cho endpoint tạm thời
+from ..schemas import StatelessChatRequest, StatelessChatResponse
+
+# Import hàm orchestrator cốt lõi
+from ...main_orchestrator import run_orchestrator
+
+# Tạo một router cho các endpoint
 router = APIRouter()
 
-@router.post(
-    "/chat",
-    response_model=ChatResponse,
-    summary="Nhận câu hỏi và trả về câu trả lời từ RAG",
-    description="Gửi một câu hỏi dạng text và nhận lại câu trả lời đã được xử lý bởi hệ thống RAG."
-)
-async def handle_chat_request(request_body: ChatRequest = Body(...)):
+@router.post("/invoke/stateless", response_model=StatelessChatResponse)
+async def invoke_stateless_assistant(request: StatelessChatRequest):
     """
-    Xử lý yêu cầu chat:
-    - Nhận **query** từ người dùng.
-    - (Tùy chọn) Nhận **user_id**.
-    - Gọi hàm RAG để lấy câu trả lời.
-    - Trả về câu trả lời.
+    Endpoint tạm thời, không lưu trữ lịch sử chat.
+    Nhận vào một câu hỏi duy nhất và trả về một câu trả lời.
+    Mỗi lần gọi là một cuộc hội thoại mới.
     """
-    if not request_body.query or not request_body.query.strip():
-        raise HTTPException(status_code=400, detail="Trường 'query' không được để trống.")
+    user_input = request.user_input
 
-    try:
-        # Gọi hàm RAG chính của bạn (đã được module hóa trong rag_services.py)
-        response_text = answer_question(request_body.query)
+    print(f"Stateless API received input: '{user_input}'")
 
-        # Nếu bạn muốn xử lý user_id hoặc các thông tin khác, hãy thêm logic ở đây
+    ai_response_text = run_orchestrator(user_input, chat_history=[])
 
-        return ChatResponse(answer=response_text)
-    except ValueError as ve: # Ví dụ bắt lỗi cụ thể từ RAG service
-        print(f"ValueError during RAG processing: {ve}")
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        # Nên log lỗi này ra để debug
-        print(f"Lỗi không xác định trong quá trình xử lý chat: {e}")
-        # import traceback
-        # traceback.print_exc() # Để debug chi tiết hơn
-        raise HTTPException(status_code=500, detail="Đã có lỗi xảy ra trong quá trình xử lý yêu cầu của bạn.")
+    return StatelessChatResponse(ai_response=ai_response_text)
 
-# Bạn có thể thêm các endpoints khác liên quan đến chat ở đây nếu cần
+# Bạn có thể giữ lại endpoint cũ ở đây để phát triển song song
+# @router.post("/invoke", ...)
