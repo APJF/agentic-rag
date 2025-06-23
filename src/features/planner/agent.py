@@ -2,8 +2,7 @@
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
-
-from src.core.agent_tools import create_full_learning_path
+from ..planner.tools import create_full_learning_path
 from src.core.llm import get_llm
 
 

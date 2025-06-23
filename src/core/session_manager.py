@@ -3,9 +3,6 @@
 from typing import List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 import psycopg2
-
-# Chúng ta sẽ giả định bạn đã có một file quản lý kết nối DB tập trung
-# Nếu chưa, bạn có thể tạo file src/core/database.py và chuyển hàm get_db_connection vào đó
 from .database import get_db_connection
 
 
@@ -15,7 +12,6 @@ def get_or_create_user(user_id: str, display_name: str = None) -> bool:
     if not conn: return False
     try:
         with conn.cursor() as cur:
-            # Dùng ON CONFLICT DO NOTHING để tránh lỗi nếu user đã tồn tại
             cur.execute(
                 "INSERT INTO users (user_id, display_name) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING;",
                 (user_id, display_name or user_id)
@@ -31,19 +27,18 @@ def get_or_create_user(user_id: str, display_name: str = None) -> bool:
 
 
 def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
-    """Lấy danh sách các phiên làm việc của một người dùng."""
+    """Lấy danh sách các phiên làm việc của một người dùng,
+    sắp xếp theo thời gian cập nhật gần nhất."""
     conn = get_db_connection()
     if not conn: return []
     sessions = []
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, session_name, updated_at FROM chat_sessions WHERE user_id = %s ORDER BY updated_at DESC;",
-                (user_id,)
-            )
+            query = "SELECT id, session_name, updated_at FROM chat_sessions WHERE user_id = %s ORDER BY updated_at DESC;"
+            cur.execute(query, (user_id,))
             rows = cur.fetchall()
             for row in rows:
-                sessions.append({"id": row[0], "name": row[1], "updated_at": row[2]})
+                sessions.append({"id": row[0], "session_name": row[1], "updated_at": row[2]})
     except psycopg2.Error as e:
         print(f"Lỗi khi liệt kê các phiên: {e}")
     finally:
@@ -151,3 +146,114 @@ def format_history_for_prompt(chat_history: List[BaseMessage]) -> str:
             pass
 
     return "\n".join(formatted_lines)
+
+
+def delete_session(session_id: int) -> bool:
+    """
+    Xóa một phiên trò chuyện và tất cả các tin nhắn liên quan khỏi database.
+    Trả về True nếu xóa thành công, False nếu không tìm thấy phiên.
+    """
+    conn = get_db_connection()
+    if not conn: return False
+
+    deleted_rows = 0
+    try:
+        with conn.cursor() as cur:
+            # Do có ràng buộc khóa ngoại "ON DELETE CASCADE",
+            # khi xóa một session, tất cả tin nhắn trong chat_messages sẽ tự động được xóa theo.
+            cur.execute("DELETE FROM chat_sessions WHERE id = %s;", (session_id,))
+            deleted_rows = cur.rowcount  # Lấy số dòng đã bị xóa
+            conn.commit()
+            if deleted_rows > 0:
+                print(f"[Thông báo] Đã xóa thành công phiên có ID: {session_id}")
+    except psycopg2.Error as e:
+        print(f"[Lỗi] Không thể xóa phiên {session_id}: {e}")
+        conn.rollback()
+    finally:
+        if conn: conn.close()
+
+    return deleted_rows > 0
+
+
+# === THÊM HÀM MỚI ĐỂ SỬA TÊN PHIÊN ===
+def rename_session(session_id: int, new_name: str) -> bool:
+    """
+    Cập nhật lại tên của một phiên trò chuyện.
+    Trả về True nếu cập nhật thành công, False nếu không tìm thấy phiên.
+    """
+    conn = get_db_connection()
+    if not conn: return False
+
+    updated_rows = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE chat_sessions SET session_name = %s, updated_at = NOW() WHERE id = %s;",
+                (new_name, session_id)
+            )
+            updated_rows = cur.rowcount
+            conn.commit()
+            if updated_rows > 0:
+                print(f"[Thông báo] Đã đổi tên phiên {session_id} thành '{new_name}'")
+    except psycopg2.Error as e:
+        print(f"[Lỗi] Không thể đổi tên phiên {session_id}: {e}")
+        conn.rollback()
+    finally:
+        if conn: conn.close()
+
+    return updated_rows > 0
+
+
+def rewind_last_turn(session_id: int) -> bool:
+    """
+    Xóa 2 tin nhắn cuối cùng (một cặp Human-AI) khỏi một phiên trong database.
+    Hàm này thực hiện hành động "tua lại" một lượt nói.
+    Trả về True nếu xóa thành công, False nếu có lỗi hoặc không có đủ tin nhắn để xóa.
+    """
+    conn = get_db_connection()
+    if not conn:
+        print("[Lỗi] Không thể kết nối DB để tua lại phiên.")
+        return False
+
+    success = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM chat_messages WHERE session_id = %s ORDER BY message_order DESC LIMIT 2;",
+                (session_id,)
+            )
+            rows_to_delete = cur.fetchall()
+
+            if len(rows_to_delete) >= 2:
+                ids_to_delete = tuple(row[0] for row in rows_to_delete)
+                cur.execute(
+                    "DELETE FROM chat_messages WHERE id IN %s;",
+                    (ids_to_delete,)
+                )
+                cur.execute("""
+                            UPDATE chat_sessions
+                            SET updated_at = (SELECT timestamp
+                            FROM chat_messages
+                            WHERE session_id = %s
+                            ORDER BY message_order DESC
+                                LIMIT 1
+                                )
+                            WHERE id = %s;
+                            """, (session_id, session_id))
+
+                conn.commit()
+                print(f"[Thông báo] Đã tua lại lượt nói cuối cùng cho phiên {session_id}")
+                success = True
+            else:
+                print("[Cảnh báo] Không có đủ tin nhắn để thực hiện thao tác sửa.")
+                conn.rollback()
+
+    except Exception as e:
+        print(f"[Lỗi] Không thể tua lại phiên: {e}")
+        conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+    return success
+

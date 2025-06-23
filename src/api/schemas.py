@@ -38,3 +38,14 @@ class Message(BaseModel):
 class HistoryResponse(BaseModel):
     session_id: int
     messages: List[Message]
+
+class SessionCreateRequest(BaseModel):
+    user_id: str = Field(..., description="ID của người dùng đang tạo phiên mới.")
+    session_name: str = Field(..., min_length=1, description="Tên do người dùng đặt cho phiên trò chuyện mới.")
+
+class SessionRenameRequest(BaseModel):
+    new_name: str = Field(..., min_length=1, description="Tên mới cho phiên trò chuyện.")
+
+class ChatEditRequest(BaseModel):
+    session_id: int = Field(..., description="ID của phiên trò chuyện cần sửa.")
+    corrected_input: str = Field(..., description="Nội dung tin nhắn mới đã được người dùng sửa lại.")

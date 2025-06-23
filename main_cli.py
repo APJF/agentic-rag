@@ -4,10 +4,7 @@ import sys
 import traceback
 from typing import Optional
 from langchain_core.messages import AIMessage, HumanMessage
-
-# Import các hàm logic chính và quản lý phiên
-# Giả sử orchestrator nằm trong src/main_orchestrator.py
-# Nếu bạn đã chuyển sang router.py, hãy đổi tên import thành from src.router import agentic_router_chain
+from src.core.session_manager import rewind_last_turn
 from src.main_orchestrator import run_orchestrator
 from src.core.session_manager import (
     get_or_create_user,
@@ -60,15 +57,12 @@ def select_or_create_session(user_id: str) -> Optional[int]:
 
 def run_chat_session(session_id: int, user_id: str):
     """
-    Khởi tạo và chạy vòng lặp chat chính cho một phiên cụ thể,
-    đồng thời hiển thị lại lịch sử chat cũ cho người dùng.
+    Khởi tạo và chạy vòng lặp chat chính, có thêm chức năng sửa tin nhắn cuối cùng.
     """
-    # Tải toàn bộ lịch sử chat của phiên này từ database
     chat_history = load_chat_history(session_id)
 
     print("\n" + "=" * 20 + " BẮT ĐẦU PHIÊN LÀM VIỆC " + "=" * 20)
 
-    # === BẮT ĐẦU SỬA LỖI: THÊM VÒNG LẶP ĐỂ IN LỊCH SỬ ===
     if chat_history:
         print("   --- Lịch sử trò chuyện trước đó ---")
         for message in chat_history:
@@ -79,31 +73,39 @@ def run_chat_session(session_id: int, user_id: str):
         print("   --- Cuộc trò chuyện tiếp tục ---\n")
     else:
         print("--- Bắt đầu phiên trò chuyện mới. Bạn hãy bắt đầu nhé! ---\n")
-    # === KẾT THÚC SỬA LỖI ===
 
-    # Vòng lặp chat chính
+    print("Gõ '/edit' để sửa tin nhắn vừa gửi, hoặc 'exit' để quay lại menu.")
+    print("------------------------------------------------------------------\n")
+
     while True:
         try:
-            # Dấu nhắc nhập liệu được chuyển ra ngoài để gọn hơn
             user_input = input(f"{user_id}: ")
+            if user_input.strip().lower() == '/edit':
+                if len(chat_history) < 2:
+                    print("AI: Không có đủ lịch sử để sửa. Vui lòng gửi ít nhất một tin nhắn.\n")
+                    continue
+                if rewind_last_turn(session_id):
+                    chat_history.pop()
+                    chat_history.pop()
+                    print("\nAI: Đã xóa lượt nói cuối cùng. Mời bạn nhập lại tin nhắn.")
+                    if chat_history:
+                        print(f"AI (lượt trước đó): {chat_history[-1].content}\n")
+                    new_input = input(f"[{user_id} sửa lại]: ")
+                    user_input = new_input
+                else:
+                    print("AI: Có lỗi xảy ra khi cố gắng sửa tin nhắn trên database. Vui lòng thử lại.\n")
+                    continue
             if user_input.lower() in ['exit', 'quit', 'bye']:
-                # Khi thoát, sẽ quay lại menu chọn phiên
-                print("Đang quay lại menu chính...")
                 break
 
             if user_input.strip():
-                # Gọi orchestrator với input và lịch sử chat đã tải
                 ai_response_text = run_orchestrator(user_input, chat_history)
                 print(f"AI: {ai_response_text}\n")
 
-                # Chuẩn bị tin nhắn mới để cập nhật
                 human_msg = HumanMessage(content=user_input)
                 ai_msg = AIMessage(content=ai_response_text)
 
-                # Cập nhật lịch sử trong bộ nhớ
                 chat_history.extend([human_msg, ai_msg])
-
-                # Lưu 2 tin nhắn mới nhất vào database
                 add_new_messages(session_id, [human_msg, ai_msg])
 
         except Exception as e:
