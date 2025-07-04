@@ -38,20 +38,15 @@ def retrieve_relevant_documents_from_db(
 
     retrieved_items = []
 
-    # --- SỬA LỖI LOGIC TẠI ĐÂY ---
-    # 1. Xây dựng mệnh đề WHERE và các tham số của nó một cách riêng biệt
     where_clauses = []
     where_params = []
     if filters:
         for key, value in filters.items():
-            # Thêm "Identifier(key)" để tránh SQL injection cho tên cột
             where_clauses.append(SQL("{}=%s").format(Identifier(key)))
             where_params.append(value)
 
     where_sql = SQL(" WHERE {}").format(SQL(" AND ").join(where_clauses)) if where_clauses else SQL("")
 
-    # 2. Xây dựng câu truy vấn cuối cùng với các placeholder
-    # Lưu ý: Identifier(table_name) để bảo vệ tên bảng
     sql_query = SQL("""
         SELECT chunk_text, source_document_name, original_page_number, level, skill_type, metadata_json
         FROM {table}
@@ -63,10 +58,7 @@ def retrieve_relevant_documents_from_db(
         where_clause=where_sql
     )
 
-    # 3. Kết hợp các tham số theo đúng thứ tự
-    # Thứ tự: [params_for_where, param_for_orderby, param_for_limit]
     final_params = where_params + [embedding_str, top_k]
-    # --- KẾT THÚC SỬA LỖI ---
 
     try:
         with conn.cursor() as cur:

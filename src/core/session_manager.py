@@ -1,5 +1,3 @@
-# src/core/session_manager.py
-
 from typing import List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 import psycopg2
@@ -7,16 +5,20 @@ from .database import get_db_connection
 
 
 def get_or_create_user(user_id: str, display_name: str = None) -> bool:
-    """Kiểm tra user_id có tồn tại không, nếu không thì tạo mới."""
+    """
+    Kiểm tra user_id có tồn tại không, nếu không thì tạo mới.
+    Đã được cập nhật để khớp với cấu trúc bảng "User" mới.
+    """
     conn = get_db_connection()
     if not conn: return False
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO users (user_id, display_name) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING;",
-                (user_id, display_name or user_id)
-            )
+            query = 'INSERT INTO "User" (id) VALUES (%s) ON CONFLICT (id) DO NOTHING;'
+
+            cur.execute(query, (user_id,))
+
             conn.commit()
+            print(f"Đã xác thực hoặc tạo người dùng: {user_id}")
             return True
     except psycopg2.Error as e:
         print(f"Lỗi khi get/create user: {e}")
@@ -159,10 +161,8 @@ def delete_session(session_id: int) -> bool:
     deleted_rows = 0
     try:
         with conn.cursor() as cur:
-            # Do có ràng buộc khóa ngoại "ON DELETE CASCADE",
-            # khi xóa một session, tất cả tin nhắn trong chat_messages sẽ tự động được xóa theo.
             cur.execute("DELETE FROM chat_sessions WHERE id = %s;", (session_id,))
-            deleted_rows = cur.rowcount  # Lấy số dòng đã bị xóa
+            deleted_rows = cur.rowcount
             conn.commit()
             if deleted_rows > 0:
                 print(f"[Thông báo] Đã xóa thành công phiên có ID: {session_id}")

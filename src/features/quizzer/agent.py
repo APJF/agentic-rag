@@ -3,8 +3,6 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-# Import các thành phần cần thiết từ các module khác
 from src.core.vector_store_interface import retrieve_relevant_documents_from_db
 from src.core.llm import get_llm
 from src.config import settings
@@ -28,18 +26,16 @@ def context_retriever_tool(level: str, topic: str = None) -> str:
     if topic:
         filters["topic"] = topic
 
-    # Lấy ra 1 chunk duy nhất để làm ngữ cảnh
     docs = retrieve_relevant_documents_from_db(
         query,
         top_k=1,
         filters=filters,
-        table_name=settings.RAG_CONTENT_CHUNK_TABLE  # Sử dụng đúng tên bảng từ settings
+        table_name=settings.RAG_CONTENT_CHUNK_TABLE
     )
 
     if not docs:
         return "Không tìm thấy ngữ cảnh phù hợp trong cơ sở dữ liệu để tạo câu hỏi."
 
-    # Trả về nội dung text của chunk đầu tiên tìm được
     return docs[0]['text']
 
 def initialize_quiz_agent():
@@ -56,7 +52,7 @@ def initialize_quiz_agent():
         ("system",
          """
          Bạn là một giáo viên tiếng Nhật nhiều kinh nghiệm, chuyên tạo ra các câu hỏi trắc nghiệm hay và phù hợp với trình độ người học.
-
+        
          QUY TRÌNH LÀM VIỆC:
          1. Dựa trên yêu cầu của người dùng về cấp độ (level) và chủ đề (topic), hãy sử dụng công cụ `context_retriever_tool` để lấy một đoạn văn bản làm "gợi ý" hoặc "nguồn cảm hứng".
          2. Sau khi nhận được kết quả (Observation) từ tool, hãy phân tích các từ khóa và ngữ pháp trong đó.

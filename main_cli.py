@@ -30,7 +30,7 @@ def select_or_create_session(user_id: str) -> Optional[int]:
         for i, session in enumerate(sessions):
             # Hiển thị thời gian cập nhật một cách thân thiện
             updated_time = session['updated_at'].strftime("%Y-%m-%d %H:%M")
-            print(f"  {i + 1}. {session['name']} (Cập nhật lúc: {updated_time})")
+            print(f"  {i + 1}. {session['session_name']} (Cập nhật lúc: {updated_time})")
     else:
         print(f"Chào {user_id}! Bạn chưa có phiên làm việc nào.")
 

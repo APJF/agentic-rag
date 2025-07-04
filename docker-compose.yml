@@ -25,6 +25,17 @@ services:
     depends_on:
       - db
     restart: unless-stopped
-
+  api:
+    build: .
+    container_name: agent_api_service
+    env_file:
+      - .env
+    ports:
+      - "8085:8085"
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      - db
+    restart: unless-stopped
 volumes:
   pgvector-data:

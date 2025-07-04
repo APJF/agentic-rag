@@ -3,8 +3,13 @@ import psycopg2
 from psycopg2.sql import SQL, Identifier, Literal
 from src.config import settings
 from src.core.embedding import encode_text
+from typing import List, Dict, Any
 
 def get_db_connection():
+    """
+    Tạo và trả về một kết nối mới đến database PostgreSQL.
+    Đọc thông tin kết nối từ file settings.
+    """
     try:
         conn = psycopg2.connect(
             host=settings.DB_HOST,
@@ -14,9 +19,55 @@ def get_db_connection():
             password=settings.DB_PASSWORD
         )
         return conn
-    except psycopg2.Error as e:
-        print(f"Database connection error: {e}")
+    except psycopg2.OperationalError as e:
+        print(f"Lỗi kết nối database (OperationalError): {e}")
         return None
+    except psycopg2.Error as e:
+        print(f"Lỗi database không xác định: {e}")
+        return None
+
+
+def execute_sql_query(query: str, params: tuple = None) -> List[Dict[str, Any]]:
+    """
+    Hàm trợ giúp chung để thực thi một câu lệnh SELECT và trả về kết quả
+    dưới dạng một danh sách các dictionary.
+
+    Args:
+        query: Chuỗi SQL cần thực thi.
+        params: Tuple chứa các tham số cho câu lệnh SQL để tránh SQL injection.
+
+    Returns:
+        Một danh sách các dictionary, mỗi dictionary đại diện cho một dòng kết quả.
+        Trả về danh sách rỗng nếu có lỗi hoặc không có kết quả.
+    """
+    conn = get_db_connection()
+    if not conn:
+        # Không thể kết nối, trả về danh sách rỗng
+        return []
+
+    results = []
+    try:
+        # Sử dụng 'with' để đảm bảo cursor được đóng đúng cách
+        with conn.cursor() as cur:
+            cur.execute(query, params or ())
+
+            # Kiểm tra xem truy vấn có trả về kết quả không
+            if cur.description:
+                # Lấy tên các cột từ cur.description để làm key cho dictionary
+                colnames = [desc[0] for desc in cur.description]
+                rows = cur.fetchall()
+                for row in rows:
+                    results.append(dict(zip(colnames, row)))
+    except psycopg2.Error as e:
+        print(f"Lỗi khi thực thi câu lệnh SQL: {e}")
+        # Không cần rollback với lệnh SELECT, nhưng vẫn nên có
+        conn.rollback()
+    finally:
+        # Luôn đóng kết nối sau khi hoàn tất
+        if conn:
+            conn.close()
+
+    return results
 
 
 def retrieve_relevant_documents_from_db(
