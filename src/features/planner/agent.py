@@ -3,9 +3,14 @@
 from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
-
-# Import bộ công cụ đã được tinh giản
-from .tools import find_relevant_courses, get_course_structure, calculate_time_constraints
+from .tools import (
+    list_user_learning_paths,
+    get_user_profile,
+    save_new_learning_path,
+    find_relevant_courses,
+    get_course_structure,
+    calculate_time_constraints
+)
 from ...core.llm import get_llm
 
 def initialize_planning_agent():
@@ -18,7 +23,14 @@ def initialize_planning_agent():
         print("Lỗi: LLM chưa được khởi tạo.")
         return None
 
-    tools = [find_relevant_courses, get_course_structure, calculate_time_constraints]
+    tools = [
+        list_user_learning_paths,
+        get_user_profile,
+        save_new_learning_path,
+        find_relevant_courses,
+        get_course_structure,
+        calculate_time_constraints
+    ]
 
     system_prompt = """
     Bạn là một Kiến trúc sư Lộ trình học tiếng Nhật, rất có phương pháp và logic.
@@ -27,7 +39,7 @@ def initialize_planning_agent():
     **QUY TRÌNH SUY LUẬN VÀ HÀNH ĐỘNG BẮT BUỘC:**
 
     **GIAI ĐOẠN 1: THU THẬP VÀ PHÂN TÍCH YÊU CẦU**
-    - **Bước 1.1:** Bắt đầu cuộc trò chuyện để thu thập đủ 3 thông tin: `current_level`, `learning_goal`, và `focus_skill` và `deadline_info` (thông tin về thời hạn).
+    - **Bước 1.1:** Bắt đầu cuộc trò chuyện để thu thập đủ 3 thông tin: `current_level`, `learning_goal`, và `focus_skill` và `deadline_info` (thông tin về thời hạn). Cần phải hỏi từng câu và khi nhận được câu trả lời cần linh hoạt xác định thông tin ở trong đó.
     - **Bước 1.2: Xác định `target_level`:**
         - **Nếu** người dùng có mục tiêu cụ thể (ví dụ: "Thi JLPT N3"), thì `target_level` chính là N3.
         - **Nếu** người dùng chỉ yêu cầu "cải thiện kỹ năng" mà không nói rõ level, bạn PHẢI tự tính toán `target_level` theo quy tắc sau:
