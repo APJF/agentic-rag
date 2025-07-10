@@ -14,7 +14,6 @@ from src.core.session_manager import (
     add_new_messages
 )
 
-
 def select_or_create_session(user_id: str) -> Optional[int]:
     """
     Hàm này có nhiệm vụ hiển thị menu lựa chọn phiên cho người dùng.
