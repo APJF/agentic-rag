@@ -29,7 +29,6 @@ def retrieve_relevant_documents_from_db(
     Truy xuất các tài liệu liên quan từ CSDL với logic xây dựng query đã được sửa lỗi.
     """
     query_embedding = encode_text(query_text)
-    # Chuyển embedding thành chuỗi string theo định dạng của pgvector
     embedding_str = str(list(query_embedding))
 
     conn = get_db_connection()
@@ -70,8 +69,6 @@ def retrieve_relevant_documents_from_db(
                     "metadata": {"document": row[1], "page": row[2], "level": row[3], "skill": row[4], "lesson": (row[5] or {}).get('lesson')}
                 })
     except Exception as e:
-        # In ra câu lệnh và tham số để debug dễ hơn
-        # print("SQL Query Failed:", cur.mogrify(sql_query, final_params).decode())
         print(f"Lỗi truy xuất chunk từ bảng {table_name}: {e}")
     finally:
         if conn:
@@ -81,7 +78,6 @@ def retrieve_relevant_documents_from_db(
 
 def find_precise_definitional_source_from_db(
     japanese_term: str,
-    # SỬA Ở ĐÂY: Dùng tên biến đã chuẩn hóa
     table_name: str = settings.RAG_CONTENT_CHUNK_TABLE
 ) -> dict | None:
     if not japanese_term: return None

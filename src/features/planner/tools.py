@@ -83,8 +83,6 @@ def create_full_learning_path(current_level: str, learning_goal: str, personal_i
         description = (subject.get('description', '') or '').lower()
         subject_name = (subject.get('subject_name', '') or '').lower()
         topic = (subject.get('topic', '') or '').lower()
-
-        # Chấm điểm dựa trên sở thích và mục tiêu
         for keyword in interest_keywords:
             if keyword in description or keyword in subject_name or keyword in topic:
                 score += 5  # Rất liên quan đến sở thích
