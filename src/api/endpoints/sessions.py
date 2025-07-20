@@ -2,20 +2,21 @@
 
 from fastapi import APIRouter, HTTPException, Path, Body, status, Response
 from typing import List
-from ..schemas import SessionListResponse, HistoryResponse, Message, SessionCreateRequest, SessionInfo, \
-    SessionRenameRequest, ChatResponse, ChatEditRequest
+
+# Import các schema cần thiết
+from ..schemas import SessionListResponse, HistoryResponse, Message, SessionCreateRequest, SessionInfo, SessionRenameRequest, RewindResponse
+
+# Import các hàm xử lý logic từ session_manager
 from ...core.session_manager import (
-    rewind_last_turn,
     list_sessions_for_user,
     load_chat_history,
     create_new_session,
     get_or_create_user,
     delete_session,
-    rename_session, add_new_messages
+    rename_session,
+    rewind_last_turn
 )
 from langchain_core.messages import HumanMessage, AIMessage
-
-from ...main_orchestrator import run_orchestrator
 
 router = APIRouter()
 

@@ -4,12 +4,6 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime
 
-class StatelessChatRequest(BaseModel):
-    user_input: str
-
-class StatelessChatResponse(BaseModel):
-    ai_response: str
-
 # Bạn có thể giữ lại các schema cũ để dùng cho API có trạng thái sau này
 class ChatRequest(BaseModel):
     session_id: str
@@ -49,3 +43,8 @@ class SessionRenameRequest(BaseModel):
 class ChatEditRequest(BaseModel):
     session_id: int = Field(..., description="ID của phiên trò chuyện cần sửa.")
     corrected_input: str = Field(..., description="Nội dung tin nhắn mới đã được người dùng sửa lại.")
+
+class RewindResponse(BaseModel):
+    session_id: int
+    message: str
+    rewound_messages_count: int
