@@ -44,7 +44,7 @@ else:
             print("\n>>> KẾT NỐI THÀNH CÔNG nhưng bucket rỗng hoặc không có file nào.")
 
     except ClientError as e:
-        print(f"\n>>> KẾT NỐI THẤT BẠI! <<<")
+        print("\n>>> KẾT NỐI THẤT BẠI! <<<")
         error_code = e.response.get("Error", {}).get("Code")
         if error_code == 'InvalidAccessKeyId':
             print("Lỗi: Access Key ID không hợp lệ.")

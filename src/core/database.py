@@ -1,6 +1,6 @@
 # src/core/vector_store_interface.py
 import psycopg2
-from psycopg2.sql import SQL, Identifier, Literal
+from psycopg2.sql import SQL, Identifier
 from src.config import settings
 from src.core.embedding import encode_text
 from typing import List, Dict, Any

@@ -4,7 +4,7 @@ import psycopg2
 from .database import get_db_connection
 
 
-def get_or_create_user(user_id: str, display_name: str = None) -> bool:
+def get_or_create_user(user_id: str) -> bool:
     """
     Kiểm tra user_id có tồn tại không, nếu không thì tạo mới.
     Đã được cập nhật để khớp với cấu trúc bảng "User" mới.
@@ -78,7 +78,7 @@ def load_chat_history(session_id: int) -> List[BaseMessage]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT message_type, content FROM chat_messenger WHERE session_id = %s ORDER BY message_order ASC;",
+                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order ASC;",
                 (session_id,)
             )
             for row in cur.fetchall():
@@ -100,14 +100,14 @@ def add_new_messages(session_id: int, new_messages: List[BaseMessage]):
     if not conn: return
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(message_order), 0) FROM chat_messenger WHERE session_id = %s;",
+            cur.execute("SELECT COALESCE(MAX(messenger_order), 0) FROM chat_messenger WHERE session_id = %s;",
                         (session_id,))
             last_order = cur.fetchone()[0]
 
             for i, msg in enumerate(new_messages):
                 message_type = 'human' if isinstance(msg, HumanMessage) else 'ai'
                 cur.execute(
-                    "INSERT INTO chat_messenger (session_id, message_type, content, message_order) VALUES (%s, %s, %s, %s);",
+                    "INSERT INTO chat_messenger (session_id, messenger_type, content, messenger_order) VALUES (%s, %s, %s, %s);",
                     (session_id, message_type, msg.content, last_order + i + 1)
                 )
 
@@ -174,8 +174,6 @@ def delete_session(session_id: int) -> bool:
 
     return deleted_rows > 0
 
-
-# === THÊM HÀM MỚI ĐỂ SỬA TÊN PHIÊN ===
 def rename_session(session_id: int, new_name: str) -> bool:
     """
     Cập nhật lại tên của một phiên trò chuyện.
@@ -219,7 +217,7 @@ def rewind_last_turn(session_id: int) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM chat_messenger WHERE session_id = %s ORDER BY message_order DESC LIMIT 2;",
+                "SELECT id FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order DESC LIMIT 2;",
                 (session_id,)
             )
             rows_to_delete = cur.fetchall()
@@ -235,7 +233,7 @@ def rewind_last_turn(session_id: int) -> bool:
                             SET updated_at = (SELECT timestamp
                             FROM chat_messenger
                             WHERE session_id = %s
-                            ORDER BY message_order DESC
+                            ORDER BY messenger_order DESC
                                 LIMIT 1
                                 )
                             WHERE id = %s;

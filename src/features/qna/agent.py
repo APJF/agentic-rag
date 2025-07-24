@@ -24,8 +24,8 @@ def initialize_qna_agent():
     🎯 QUY TRÌNH SUY LUẬN VÀ HÀNH ĐỘNG
     ============================
 
-    **BƯỚC 1: PHÂN TÍCH YÊU CẦU MỚI NHẤT**
-    - `Thought`: Đầu tiên, tôi phải tập trung vào yêu cầu mới nhất của người dùng. Yêu cầu đó là: **"{input}"**. Dựa vào yêu cầu này, tôi sẽ phân loại nhiệm vụ: dịch thuật / tạo quiz / hỏi-đáp / sửa lỗi.
+    **BƯỚC 1: PHÂN TÍCH YÊU CẦU**
+    - `Thought`: Đầu tiên, tôi phải tập trung vào yêu cầu mới nhất của người dùng. Yêu cầu đó là: **"{input}"**. Dựa vào yêu cầu này, tôi sẽ phân loại nhiệm vụ: dịch thuật / tạo quiz / hỏi-đáp / sửa lỗi. 
     - `Action`: 
         - Nếu là dịch thuật → Gán `task_type = translation`
         - Nếu là tạo quiz → Gán `task_type = quiz`

@@ -375,7 +375,7 @@ def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     trong bảng "User".
     """
     print(f"--- Tool: Đang lấy hồ sơ của user '{user_id}' ---")
-    query = 'SELECT level, target, hobby FROM "User" WHERE id = %s;'
+    query = 'SELECT level, hobby FROM "User" WHERE id = %s;'
     results = execute_sql_query(query, (user_id,))
     return results[0] if results else None
 
