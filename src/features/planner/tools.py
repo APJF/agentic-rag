@@ -36,89 +36,89 @@ def execute_sql_query(query: str, params: tuple = None) -> List[Dict[str, Any]]:
     return results
 
 
-@tool(args_schema=PathPlannerInput)
-def create_full_learning_path(current_level: str, learning_goal: str, personal_interests: str,
-                              weekly_study_time: int) -> str:
-    """
-    Tự động tạo ra một lộ trình học tập chi tiết và cá nhân hóa dựa trên 4 thông tin đầu vào:
-    trình độ hiện tại, mục tiêu học tập, sở thích cá nhân, và thời gian học hàng tuần.
-    """
-    print("--- Tool Lập Kế Hoạch được kích hoạt ---")
-    print(
-        f"Input: Level={current_level}, Mục tiêu={learning_goal}, Sở thích={personal_interests}, Thời gian={weekly_study_time}h/tuần")
-
-    # 1. Xác định Level mục tiêu
-    levels = ['N5', 'N4', 'N3', 'N2', 'N1']
-    try:
-        current_idx = levels.index(current_level.upper())
-    except ValueError:
-        current_idx = -1
-
-    # Tìm level cao nhất được đề cập trong mục tiêu
-    target_level_match = re.search(r'N[1-5]', learning_goal.upper())
-    if target_level_match:
-        target_idx = levels.index(target_level_match.group(0))
-    else:
-        # Nếu mục tiêu không rõ ràng (du lịch, sở thích), chỉ cần học 1-2 level tiếp theo
-        target_idx = min(current_idx + 2, len(levels) - 1)
-
-    path_levels = levels[current_idx + 1: target_idx + 1]
-    if not path_levels:
-        return f"Tuyệt vời! Dường như bạn đã đạt được mục tiêu học tập của mình rồi. Nếu muốn học lên cao hơn, hãy cho tôi biết mục tiêu mới nhé!"
-
-    print(f"Lộ trình level cần học: {path_levels}")
-
-    # 2. Lấy tất cả các môn học ứng viên
-    query = "SELECT * FROM subjects WHERE level IN %s;"
-    all_subjects = execute_sql_query(query, (tuple(path_levels),))
-
-    if not all_subjects:
-        return "Xin lỗi, hiện tại chưa có môn học nào trong database phù hợp với lộ trình của bạn."
-
-    # 3. Chấm điểm và lựa chọn môn học (Logic "AI" nằm ở đây)
-    interest_keywords = [kw.strip().lower() for kw in personal_interests.split(',')]
-    scored_subjects = []
-    for subject in all_subjects:
-        score = 0
-        description = (subject.get('description', '') or '').lower()
-        subject_name = (subject.get('subject_name', '') or '').lower()
-        topic = (subject.get('topic', '') or '').lower()
-        for keyword in interest_keywords:
-            if keyword in description or keyword in subject_name or keyword in topic:
-                score += 5  # Rất liên quan đến sở thích
-        if topic and topic in learning_goal.lower():
-            score += 10  # Rất liên quan đến mục tiêu (ví dụ: topic 'IT' và mục tiêu 'Làm việc IT')
-
-        scored_subjects.append({"subject": subject, "score": score})
-
-    # Sắp xếp và chọn ra 2-3 môn có điểm cao nhất
-    top_subjects_data = sorted(scored_subjects, key=lambda x: x['score'], reverse=True)[:3]
-
-    # 4. Lấy bài học và tổng hợp thành lộ trình
-    final_plan = f"Dựa trên thông tin bạn cung cấp, đây là lộ trình học tập được cá nhân hóa cho bạn:\n"
-    final_plan += f"Mục tiêu: {learning_goal}\nLộ trình: Từ {current_level} -> {levels[target_idx]}\n\n"
-
-    total_lessons = 0
-    for item in top_subjects_data:
-        subject = item['subject']
-        final_plan += f"--- Môn học gợi ý: {subject['subject_name']} (Level: {subject['level']}) ---\n"
-        final_plan += f"Lý do gợi ý: Môn học này phù hợp với sở thích ({personal_interests}) và mục tiêu của bạn.\n"
-
-        lessons = execute_sql_query("SELECT lesson_name, lesson_type FROM lessons WHERE subject_id = %s;",
-                                    (subject['id'],))
-        if lessons:
-            final_plan += "Các bài học chính bạn nên tập trung:\n"
-            for lesson in lessons:
-                final_plan += f"  - [{lesson['lesson_type']}] {lesson['lesson_name']}\n"
-            total_lessons += len(lessons)
-        final_plan += "\n"
-
-    # 5. Phân tích thời gian (tùy chọn)
-    if total_lessons > 0 and weekly_study_time > 0:
-        estimated_weeks = round((total_lessons * 2) / weekly_study_time)  # Giả sử mỗi bài học cần 2 giờ
-        final_plan += f"** Ước tính thời gian hoàn thành lộ trình trên với {weekly_study_time} giờ/tuần là khoảng {estimated_weeks} tuần. **\n"
-
-    return final_plan
+# @tool(args_schema=PathPlannerInput)
+# def create_full_learning_path(current_level: str, learning_goal: str, personal_interests: str,
+#                               weekly_study_time: int) -> str:
+#     """
+#     Tự động tạo ra một lộ trình học tập chi tiết và cá nhân hóa dựa trên 4 thông tin đầu vào:
+#     trình độ hiện tại, mục tiêu học tập, sở thích cá nhân, và thời gian học hàng tuần.
+#     """
+#     print("--- Tool Lập Kế Hoạch được kích hoạt ---")
+#     print(
+#         f"Input: Level={current_level}, Mục tiêu={learning_goal}, Sở thích={personal_interests}, Thời gian={weekly_study_time}h/tuần")
+#
+#     # 1. Xác định Level mục tiêu
+#     levels = ['N5', 'N4', 'N3', 'N2', 'N1']
+#     try:
+#         current_idx = levels.index(current_level.upper())
+#     except ValueError:
+#         current_idx = -1
+#
+#     # Tìm level cao nhất được đề cập trong mục tiêu
+#     target_level_match = re.search(r'N[1-5]', learning_goal.upper())
+#     if target_level_match:
+#         target_idx = levels.index(target_level_match.group(0))
+#     else:
+#         # Nếu mục tiêu không rõ ràng (du lịch, sở thích), chỉ cần học 1-2 level tiếp theo
+#         target_idx = min(current_idx + 2, len(levels) - 1)
+#
+#     path_levels = levels[current_idx + 1: target_idx + 1]
+#     if not path_levels:
+#         return f"Tuyệt vời! Dường như bạn đã đạt được mục tiêu học tập của mình rồi. Nếu muốn học lên cao hơn, hãy cho tôi biết mục tiêu mới nhé!"
+#
+#     print(f"Lộ trình level cần học: {path_levels}")
+#
+#     # 2. Lấy tất cả các môn học ứng viên
+#     query = "SELECT * FROM subjects WHERE level IN %s;"
+#     all_subjects = execute_sql_query(query, (tuple(path_levels),))
+#
+#     if not all_subjects:
+#         return "Xin lỗi, hiện tại chưa có môn học nào trong database phù hợp với lộ trình của bạn."
+#
+#     # 3. Chấm điểm và lựa chọn môn học (Logic "AI" nằm ở đây)
+#     interest_keywords = [kw.strip().lower() for kw in personal_interests.split(',')]
+#     scored_subjects = []
+#     for subject in all_subjects:
+#         score = 0
+#         description = (subject.get('description', '') or '').lower()
+#         subject_name = (subject.get('subject_name', '') or '').lower()
+#         topic = (subject.get('topic', '') or '').lower()
+#         for keyword in interest_keywords:
+#             if keyword in description or keyword in subject_name or keyword in topic:
+#                 score += 5  # Rất liên quan đến sở thích
+#         if topic and topic in learning_goal.lower():
+#             score += 10  # Rất liên quan đến mục tiêu (ví dụ: topic 'IT' và mục tiêu 'Làm việc IT')
+#
+#         scored_subjects.append({"subject": subject, "score": score})
+#
+#     # Sắp xếp và chọn ra 2-3 môn có điểm cao nhất
+#     top_subjects_data = sorted(scored_subjects, key=lambda x: x['score'], reverse=True)[:3]
+#
+#     # 4. Lấy bài học và tổng hợp thành lộ trình
+#     final_plan = f"Dựa trên thông tin bạn cung cấp, đây là lộ trình học tập được cá nhân hóa cho bạn:\n"
+#     final_plan += f"Mục tiêu: {learning_goal}\nLộ trình: Từ {current_level} -> {levels[target_idx]}\n\n"
+#
+#     total_lessons = 0
+#     for item in top_subjects_data:
+#         subject = item['subject']
+#         final_plan += f"--- Môn học gợi ý: {subject['subject_name']} (Level: {subject['level']}) ---\n"
+#         final_plan += f"Lý do gợi ý: Môn học này phù hợp với sở thích ({personal_interests}) và mục tiêu của bạn.\n"
+#
+#         lessons = execute_sql_query("SELECT lesson_name, lesson_type FROM lessons WHERE subject_id = %s;",
+#                                     (subject['id'],))
+#         if lessons:
+#             final_plan += "Các bài học chính bạn nên tập trung:\n"
+#             for lesson in lessons:
+#                 final_plan += f"  - [{lesson['lesson_type']}] {lesson['lesson_name']}\n"
+#             total_lessons += len(lessons)
+#         final_plan += "\n"
+#
+#     # 5. Phân tích thời gian (tùy chọn)
+#     if total_lessons > 0 and weekly_study_time > 0:
+#         estimated_weeks = round((total_lessons * 2) / weekly_study_time)  # Giả sử mỗi bài học cần 2 giờ
+#         final_plan += f"** Ước tính thời gian hoàn thành lộ trình trên với {weekly_study_time} giờ/tuần là khoảng {estimated_weeks} tuần. **\n"
+#
+#     return final_plan
 
 
 class CourseSearchInput(BaseModel):
@@ -390,3 +390,215 @@ def save_new_learning_path(user_id: str, path_title: str, unit_ids: List[str]) -
     # Logic để lưu vào bảng LearningPath và UnitProgress sẽ được triển khai ở đây
     print(f"--- Tool: (Chưa hoạt động) Đang lưu lộ trình '{path_title}' ---")
     return f"Đã lưu thành công lộ trình '{path_title}' với {len(unit_ids)} bài học."
+
+
+@tool
+def list_user_learning_paths(user_id: str) -> List[Dict[str, Any]]:
+    """
+    Sử dụng tool này để kiểm tra xem người dùng đã có những lộ trình nào được lưu từ trước.
+    Trả về một danh sách các lộ trình, bao gồm cả trạng thái (active/archived).
+    """
+    print(f"--- Tool: Đang lấy danh sách lộ trình cho user '{user_id}' ---")
+    query = """
+            SELECT id, title, status, last_updated_at
+            FROM "learning_path"
+            WHERE user_id = %s
+            ORDER BY last_updated_at DESC; \
+            """
+    return execute_sql_query(query, (user_id,))
+
+
+# --- Tool 2: Tìm kiếm các Khóa học phù hợp ---
+class CourseSearchInput(BaseModel):
+    level: str = Field(description="Cấp độ mục tiêu của người dùng, ví dụ: 'N3'.")
+    goal: str = Field(description="Mục tiêu chính của người dùng, ví dụ: 'Thi JLPT', 'Giao tiếp'.")
+
+
+@tool(args_schema=CourseSearchInput)
+def find_relevant_courses(level: str, goal: str) -> List[Dict[str, Any]]:
+    """
+    Tìm các khóa học (Courses) phù hợp nhất dựa trên cấp độ và mục tiêu học tập.
+    """
+    print(f"--- Tool: Đang tìm các khóa học Level '{level}' cho mục tiêu '{goal}' ---")
+    # Câu lệnh này có thể được cải tiến với full-text search hoặc JOIN với bảng Topic
+    query = """
+            SELECT id, title, description, requirement, duration
+            FROM "course"
+            WHERE LOWER(level) = LOWER(%s)
+              AND (
+                LOWER(requirement) LIKE LOWER(%s)
+                    OR LOWER(description) LIKE LOWER(%s)
+                    OR LOWER(title) LIKE LOWER(%s)
+                ); \
+            """
+    search_term = f"%{goal}%"
+    return execute_sql_query(query, (level, search_term, search_term, search_term))
+
+
+# --- Tool 3: Tạo và Lưu một Lộ trình học mới ---
+class CreatePathInput(BaseModel):
+    user_id: str = Field(description="ID của người dùng.")
+    title: str = Field(description="Tên của lộ trình học mới.")
+    description: str = Field(description="Mô tả ngắn gọn về lộ trình.")
+    target_level: str = Field(description="Cấp độ mục tiêu của lộ trình.")
+    primary_goal: str = Field(description="Mục tiêu chính của lộ trình.")
+    focus_skill: str = Field(description="Kỹ năng chính muốn tập trung.")
+    course_ids: List[str] = Field(description="Danh sách ID của các Course cần đưa vào lộ trình.")
+
+
+@tool(args_schema=CreatePathInput)
+def create_new_learning_path(user_id: str, title: str, description: str, target_level: str, primary_goal: str,
+                             focus_skill: str, course_ids: List[str]) -> str:
+    """
+    Tạo một lộ trình học mới và liên kết các Khóa học (Courses) đã được chọn vào đó.
+    Tool này sẽ tự động chuyển các lộ trình cũ của người dùng sang trạng thái 'ARCHIVED'.
+    """
+    print(f"--- Tool: Đang tạo lộ trình mới '{title}' cho user '{user_id}' ---")
+    conn = get_db_connection()
+    if not conn: return "Lỗi: Không thể kết nối database."
+
+    try:
+        with conn.cursor() as cur:
+            # Bước 1: Deactivate tất cả các lộ trình cũ của user này
+            cur.execute('UPDATE "learning_path" SET status = \'ARCHIVED\' WHERE user_id = %s;', (user_id,))
+            print(f"Đã lưu trữ các lộ trình cũ của user '{user_id}'.")
+
+            # Bước 2: Tạo bản ghi mới trong learning_path với status là 'ACTIVE'
+            cur.execute(
+                """
+                INSERT INTO "learning_path" (user_id, title, description, target_level, primary_goal, focus_skill,
+                                             status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE') RETURNING id;
+                """,
+                (user_id, title, description, target_level, primary_goal, focus_skill)
+            )
+            path_id = cur.fetchone()[0]
+
+            # Bước 3: Chèn các liên kết vào course_learning_path
+            if course_ids:
+                values_to_insert = [(course_id, path_id, index + 1) for index, course_id in enumerate(course_ids)]
+                from psycopg2.extras import execute_values
+                execute_values(
+                    cur,
+                    'INSERT INTO "course_learning_path" (course_id, learning_path_id, course_order_number) VALUES %s;',
+                    values_to_insert
+                )
+
+            conn.commit()
+            return f"Đã tạo và kích hoạt thành công lộ trình mới '{title}' (ID: {path_id}) với {len(course_ids)} khóa học."
+    except Exception as e:
+        conn.rollback()
+        return f"Lỗi khi tạo lộ trình: {e}"
+    finally:
+        if conn: conn.close()
+
+
+# --- Tool 4: Xóa một Lộ trình học ---
+@tool
+def delete_learning_path(path_id: int) -> str:
+    """
+    Xóa một lộ trình học cụ thể dựa trên ID của nó.
+    Hành động này không thể hoàn tác.
+    """
+    print(f"--- Tool: Đang xóa lộ trình ID: {path_id} ---")
+    conn = get_db_connection()
+    if not conn: return "Lỗi: Không thể kết nối database."
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM "learning_path" WHERE id = %s;', (path_id,))
+            deleted_rows = cur.rowcount
+            conn.commit()
+            if deleted_rows > 0:
+                return f"Đã xóa thành công lộ trình ID {path_id}."
+            else:
+                return f"Không tìm thấy lộ trình nào có ID {path_id} để xóa."
+    except Exception as e:
+        conn.rollback()
+        return f"Lỗi khi xóa lộ trình: {e}"
+    finally:
+        if conn: conn.close()
+
+
+@tool
+def list_user_learning_paths(user_id: str) -> List[Dict[str, Any]]:
+    """Lấy danh sách tóm tắt các lộ trình học của một người dùng."""
+    print(f"--- Tool: Đang lấy danh sách lộ trình cho user '{user_id}' ---")
+    query = 'SELECT id, title, status FROM "learning_path" WHERE user_id = %s ORDER BY last_updated_at DESC;'
+    return execute_sql_query(query, (user_id,))
+
+
+@tool
+def get_learning_path_details(path_id: int) -> Dict[str, Any]:
+    """Lấy thông tin chi tiết của một lộ trình học, bao gồm cả các khóa học bên trong."""
+    print(f"--- Tool: Đang lấy chi tiết lộ trình ID: {path_id} ---")
+    path_details_query = 'SELECT * FROM "learning_path" WHERE id = %s;'
+    courses_query = """
+                    SELECT C.id, C.title, CLP.course_order_number
+                    FROM "course" C
+                             JOIN "course_learning_path" CLP ON C.id = CLP.course_id
+                    WHERE CLP.learning_path_id = %s
+                    ORDER BY CLP.course_order_number ASC; \
+                    """
+    path_info = execute_sql_query(path_details_query, (path_id,))
+    if not path_info:
+        return {"error": f"Không tìm thấy lộ trình với ID {path_id}."}
+
+    courses_in_path = execute_sql_query(courses_query, (path_id,))
+    path_info[0]['courses'] = courses_in_path
+    return path_info[0]
+
+
+@tool
+def add_courses_to_learning_path(path_id: int, course_ids: List[str]) -> str:
+    """Thêm một hoặc nhiều khóa học mới vào cuối một lộ trình đã có."""
+    print(f"--- Tool: Đang thêm các khóa học {course_ids} vào lộ trình ID: {path_id} ---")
+    conn = get_db_connection()
+    if not conn: return "Lỗi: Không thể kết nối database."
+    try:
+        with conn.cursor() as cur:
+            # Lấy order number lớn nhất hiện có
+            cur.execute(
+                'SELECT COALESCE(MAX(course_order_number), 0) FROM "course_learning_path" WHERE learning_path_id = %s;',
+                (path_id,))
+            last_order = cur.fetchone()[0]
+
+            # Chèn các khóa học mới
+            values_to_insert = [(course_id, path_id, last_order + i + 1) for i, course_id in enumerate(course_ids)]
+            execute_values(cur,
+                           'INSERT INTO "course_learning_path" (course_id, learning_path_id, course_order_number) VALUES %s;',
+                           values_to_insert)
+
+            # Cập nhật thời gian
+            cur.execute('UPDATE "learning_path" SET last_updated_at = NOW() WHERE id = %s;', (path_id,))
+            conn.commit()
+            return f"Đã thêm thành công {len(course_ids)} khóa học vào lộ trình."
+    except Exception as e:
+        conn.rollback();
+        return f"Lỗi khi thêm khóa học: {e}"
+    finally:
+        if conn: conn.close()
+
+
+@tool
+def reorder_courses_in_learning_path(path_id: int, ordered_course_ids: List[str]) -> str:
+    """Cập nhật lại toàn bộ thứ tự của các khóa học trong một lộ trình."""
+    print(f"--- Tool: Đang sắp xếp lại các khóa học trong lộ trình ID: {path_id} ---")
+    conn = get_db_connection()
+    if not conn: return "Lỗi: Không thể kết nối database."
+    try:
+        with conn.cursor() as cur:
+            # Dùng vòng lặp để UPDATE từng dòng
+            for index, course_id in enumerate(ordered_course_ids):
+                cur.execute(
+                    'UPDATE "course_learning_path" SET course_order_number = %s WHERE learning_path_id = %s AND course_id = %s;',
+                    (index + 1, path_id, course_id)
+                )
+            cur.execute('UPDATE "learning_path" SET last_updated_at = NOW() WHERE id = %s;', (path_id,))
+            conn.commit()
+            return "Đã cập nhật thành công thứ tự các khóa học."
+    except Exception as e:
+        conn.rollback();
+        return f"Lỗi khi sắp xếp lại khóa học: {e}"
+    finally:
+        if conn: conn.close()

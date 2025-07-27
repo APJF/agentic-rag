@@ -1,50 +1,63 @@
 # src/api/schemas.py
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
-# Bạn có thể giữ lại các schema cũ để dùng cho API có trạng thái sau này
-class ChatRequest(BaseModel):
-    session_id: str
-    user_input: str
-
-class ChatResponse(BaseModel):
-    session_id: str
-    ai_response: str
+# --- Schemas cho Quản lý Phiên (Sessions) ---
 
 class SessionInfo(BaseModel):
     id: int
     session_name: str
     updated_at: datetime
 
-# Schema cho response trả về danh sách các phiên
 class SessionListResponse(BaseModel):
     user_id: str
     sessions: List[SessionInfo]
 
-# Schema cho một tin nhắn duy nhất trong lịch sử
+class SessionCreateRequest(BaseModel):
+    user_id: str = Field(..., description="ID của người dùng đang tạo phiên.")
+    session_name: str = Field(..., description="Tên do người dùng đặt cho phiên.")
+    session_type: Optional[str] = Field('GENERAL', description="Loại phiên: GENERAL, PLANNER, STUDY, EXAM_REVIEW.")
+    context: Optional[Dict[str, Any]] = Field(None, description="Ngữ cảnh ban đầu cho phiên.")
+
+class SessionRenameRequest(BaseModel):
+    new_name: str = Field(..., min_length=1, description="Tên mới cho phiên.")
+
+# --- Schemas cho Tương tác Chat (Chat & Planner) ---
+
+class ChatRequest(BaseModel):
+    session_id: int = Field(..., description="ID của phiên trò chuyện đang diễn ra.")
+    user_input: str = Field(..., description="Nội dung tin nhắn mới của người dùng.")
+
+class ChatResponse(BaseModel):
+    session_id: str
+    ai_response: str
+
+class ChatEditRequest(BaseModel):
+    session_id: int = Field(..., description="ID của phiên cần sửa.")
+    corrected_input: str = Field(..., description="Nội dung tin nhắn đã được sửa lại.")
+
+class SessionInfo(BaseModel):
+    id: int
+    session_name: str
+    updated_at: datetime
+# --- Schemas cho Lịch sử Chat ---
+
 class Message(BaseModel):
     type: Literal['human', 'ai']
     content: str
 
-# Schema cho response trả về toàn bộ lịch sử của một phiên
 class HistoryResponse(BaseModel):
     session_id: int
     messages: List[Message]
 
-class SessionCreateRequest(BaseModel):
-    user_id: str = Field(..., description="ID của người dùng đang tạo phiên mới.")
-    session_name: str = Field(..., min_length=1, description="Tên do người dùng đặt cho phiên trò chuyện mới.")
+# === THÊM CÁC SCHEMA MỚI CHO CHỨC NĂNG CHẤM BÀI ===
 
-class SessionRenameRequest(BaseModel):
-    new_name: str = Field(..., min_length=1, description="Tên mới cho phiên trò chuyện.")
+class ExamGradeRequest(BaseModel):
+    exam_result_id: int = Field(..., description="ID của bài làm (exam_result) cần được chấm và nhận xét.")
 
-class ChatEditRequest(BaseModel):
-    session_id: int = Field(..., description="ID của phiên trò chuyện cần sửa.")
-    corrected_input: str = Field(..., description="Nội dung tin nhắn mới đã được người dùng sửa lại.")
-
-class RewindResponse(BaseModel):
-    session_id: int
-    message: str
-    rewound_messages_count: int
+class ExamGradeResponse(BaseModel):
+    exam_result_id: int
+    overall_score: float
+    ai_feedback: str #
