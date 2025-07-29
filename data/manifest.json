@@ -1,74 +1,74 @@
 [
-  {
-    "pdf_path": "data/input_pdfs/tuvung_quyendo.pdf",
-    "description": "File PDF chứa từ vựng cho các môn N5.",
-    "courses": [
-      {
-        "course_id": "JPD113",
-        "skill_type": "VOCABULARY",
-        "start_page": 1,
-        "end_page": 17
-      },
-      {
-        "course_id": "JPD123",
-        "skill_type": "VOCABULARY",
-        "start_page": 18,
-        "end_page": 32
-      },
-      {
-        "course_id": "JPD133",
-        "skill_type": "VOCABULARY",
-        "start_page": 33,
-        "end_page": 43
-      }
-    ]
-  },
-  {
-    "pdf_path": "data/input_pdfs/tuvung_quyenvang.pdf",
-    "description": "File PDF chứa từ vựng cho các môn N4.",
-    "courses": [
-      {
-        "course_id": "JPD216",
-        "skill_type": "VOCABULARY",
-        "start_page": 3,
-        "end_page": 16
-      },
-      {
-        "course_id": "JPD226",
-        "skill_type": "VOCABULARY",
-        "start_page": 17,
-        "end_page": 33
-      }
-    ]
-  },
-  {
-    "pdf_path": "data/input_pdfs/tuvung_quyenxanh.pdf",
-    "description": "File PDF chứa từ vựng cho các môn N3.",
-    "courses": [
-      {
-        "course_id": "JPD316",
-        "skill_type": "VOCABULARY",
-        "start_page": 1,
-        "end_page": 10
-      },
-      {
-        "course_id": "JPD326",
-        "skill_type": "VOCABULARY",
-        "start_page": 11,
-        "end_page": 20
-      },
-      {
-        "course_id": "JPD336",
-        "skill_type": "VOCABULARY",
-        "start_page": 21,
-        "end_page": 31
-      },
-      {
-        "course_id": "JPD346",
-        "skill_type": "VOCABULARY",
-        "start_page": 32,
-        "end_page": 42
-      }
-    ]
-  }
+ {
+   "pdf_path": "data/input_pdfs/tuvung_quyendo.pdf",
+   "description": "File PDF chứa từ vựng cho các môn N5.",
+   "courses": [
+     {
+       "course_id": "JPD113",
+       "skill_type": "VOCABULARY",
+       "start_page": 1,
+       "end_page": 11
+     },
+     {
+       "course_id": "JPD123",
+       "skill_type": "VOCABULARY",
+       "start_page": 12,
+       "end_page": 23
+     },
+     {
+       "course_id": "JPD126",
+       "skill_type": "VOCABULARY",
+       "start_page": 24,
+       "end_page": 43
+     }
+   ]
+ },
+ {
+   "pdf_path": "data/input_pdfs/tuvung_quyenvang.pdf",
+   "description": "File PDF chứa từ vựng cho các môn N4.",
+   "courses": [
+     {
+       "course_id": "JPD216",
+       "skill_type": "VOCABULARY",
+       "start_page": 3,
+       "end_page": 16
+     },
+     {
+       "course_id": "JPD226",
+       "skill_type": "VOCABULARY",
+       "start_page": 17,
+       "end_page": 33
+     }
+   ]
+ },
+ {
+   "pdf_path": "data/input_pdfs/tuvung_quyenxanh.pdf",
+   "description": "File PDF chứa từ vựng cho các môn N3.",
+   "courses": [
+     {
+       "course_id": "JPD316",
+       "skill_type": "VOCABULARY",
+       "start_page": 1,
+       "end_page": 10
+     },
+     {
+       "course_id": "JPD326",
+       "skill_type": "VOCABULARY",
+       "start_page": 11,
+       "end_page": 20
+     },
+     {
+       "course_id": "JPD336",
+       "skill_type": "VOCABULARY",
+       "start_page": 21,
+       "end_page": 31
+     },
+     {
+       "course_id": "JPD346",
+       "skill_type": "VOCABULARY",
+       "start_page": 32,
+       "end_page": 42
+     }
+   ]
+ }
 ]

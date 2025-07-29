@@ -61,3 +61,14 @@ class ExamGradeResponse(BaseModel):
     exam_result_id: int
     overall_score: float
     ai_feedback: str #
+
+class ChatInitiateRequest(BaseModel):
+    user_id: str = Field(..., description="ID của người dùng.")
+    session_type: str = Field(..., description="Loại phiên: GENERAL, PLANNER, STUDY, EXAM_REVIEW.")
+    first_message: str = Field(..., description="Nội dung tin nhắn đầu tiên của người dùng.")
+    context: Optional[Dict[str, Any]] = Field(None, description="Ngữ cảnh ban đầu cho phiên.")
+
+class ChatInitiateResponse(BaseModel):
+    session_id: int
+    session_name: str
+    ai_first_response: str
