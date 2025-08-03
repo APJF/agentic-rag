@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "requirements.txt": "pip-requirements",
+        "*.txt": "text"
+    }
+}

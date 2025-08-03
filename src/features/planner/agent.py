@@ -4,13 +4,12 @@ from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 from .tools import (
-    list_user_learning_paths,
-    get_user_profile,
-    save_new_learning_path,
-    find_relevant_courses,
-    get_course_structure,
-    calculate_time_constraints, get_learning_path_details, create_new_learning_path, delete_learning_path,
-    add_courses_to_learning_path, reorder_courses_in_learning_path
+    list_learning_paths,
+    get_learning_path_details,
+    update_learning_path,
+    archive_learning_path,
+    add_courses_to_learning_path,
+    reorder_courses_in_learning_path,
 )
 from ...core.llm import get_llm
 
@@ -25,18 +24,12 @@ def initialize_planning_agent():
         return None
 
     tools = [
-        list_user_learning_paths,
-        get_user_profile,
-        save_new_learning_path,
-        find_relevant_courses,
-        get_course_structure,
-        calculate_time_constraints,
-        list_user_learning_paths,
-        get_learning_path_details,  # Tool mới
-        create_new_learning_path,
-        delete_learning_path,
-        add_courses_to_learning_path,  # Tool mới
-        reorder_courses_in_learning_path  # Tool mới
+        list_learning_paths,
+        get_learning_path_details,
+        update_learning_path,
+        archive_learning_path,
+        add_courses_to_learning_path,
+        reorder_courses_in_learning_path,
     ]
 
     system_prompt =  """

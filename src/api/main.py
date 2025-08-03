@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Giả sử bạn có các router này
-from .endpoints import chat, sessions, planner, learning, reviewer
+from .endpoints import chat, sessions, planner, learning, reviewer, speaking, dispatcher
 
 # Khởi tạo ứng dụng FastAPI
 app = FastAPI(
@@ -29,9 +29,7 @@ app.add_middleware(
 )
 app.include_router(sessions.router, prefix="/sessions", tags=["Session Management"])
 app.include_router(planner.router, prefix="/planner", tags=["Learning Path Planner"])
-app.include_router(chat.router, prefix="/chat", tags=["General QnA Tutor"])
-app.include_router(learning.router, prefix="/learning", tags=["Contextual Study Chat"])
-app.include_router(reviewer.router, prefix="/reviewer", tags=["Exam Reviewer"])
+app.include_router(dispatcher.router, prefix="", tags=["Dispatcher"])
 
 @app.get("/", tags=["Root"])
 async def read_root():
