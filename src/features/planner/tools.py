@@ -1,10 +1,45 @@
-import re
 from langchain.tools import tool
 from psycopg2.extras import execute_values
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Optional, Tuple
 from src.core.vector_store_interface import get_db_connection
 from ...core.database import execute_sql_query
+
+# Constants for error messages
+ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION = "Không tìm thấy lộ trình hoặc bạn không có quyền."
+ERROR_DB_CONNECTION = "Không thể kết nối database."
+ERROR_ONLY_ACTIVE_PATHS = "Chỉ có thể cập nhật lộ trình đang hoạt động."
+ERROR_ONLY_ARCHIVE_ACTIVE = "Chỉ có thể archive lộ trình đang hoạt động."
+ERROR_ONLY_ADD_TO_ACTIVE = "Chỉ có thể thêm khóa học vào lộ trình đang hoạt động."
+ERROR_ONLY_REORDER_ACTIVE = "Chỉ có thể sắp xếp lại khóa học trong lộ trình đang hoạt động."
+ERROR_NO_FIELDS_TO_UPDATE = "Không có trường nào để cập nhật."
+
+# Constants for SQL queries
+SQL_CHECK_PATH_STATUS = 'SELECT status FROM learning_path WHERE id = %s AND user_id = %s;'
+SQL_GET_PATH_DETAILS = 'SELECT * FROM learning_path WHERE id = %s AND user_id = %s;'
+SQL_LIST_USER_PATHS = 'SELECT id, title, status, last_updated_at FROM learning_path WHERE user_id = %s ORDER BY last_updated_at DESC;'
+SQL_GET_PATH_COURSES = '''
+    SELECT C.id, C.title, CLP.course_order_number
+    FROM course C
+    JOIN course_learning_path CLP ON C.id = CLP.course_id
+    WHERE CLP.learning_path_id = %s
+    ORDER BY CLP.course_order_number;
+'''
+
+# Helper function to check path ownership and status
+def _check_path_access(cursor, path_id: int, user_id: str, required_status: str = 'ACTIVE') -> Tuple[bool, Optional[str]]:
+    """
+    Check if user has access to learning path and if it has required status.
+    Returns (has_access, current_status)
+    """
+    cursor.execute(SQL_CHECK_PATH_STATUS, (path_id, user_id))
+    row = cursor.fetchone()
+    if not row:
+        return False, None
+    current_status = row[0]
+    if required_status and current_status != required_status:
+        return False, current_status
+    return True, current_status
 
 # =====================
 # SCHEMA INPUTS
@@ -61,19 +96,11 @@ def get_learning_path_details(path_id: int, user_id: str) -> dict:
     Lấy chi tiết lộ trình học (chỉ khi user sở hữu).
     """
     try:
-        query = 'SELECT * FROM learning_path WHERE id = %s AND user_id = %s;'
-        path = execute_sql_query(query, (path_id, user_id))
+        path = execute_sql_query(SQL_GET_PATH_DETAILS, (path_id, user_id))
         if not path:
-            return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền truy cập."}
+            return {"error": ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION}
         # Lấy danh sách khóa học
-        courses_query = '''
-            SELECT C.id, C.title, CLP.course_order_number
-            FROM course C
-            JOIN course_learning_path CLP ON C.id = CLP.course_id
-            WHERE CLP.learning_path_id = %s
-            ORDER BY CLP.course_order_number ASC;
-        '''
-        courses = execute_sql_query(courses_query, (path_id,))
+        courses = execute_sql_query(SQL_GET_PATH_COURSES, (path_id,))
         path[0]['courses'] = courses
         return {"success": True, "data": path[0]}
     except Exception as e:
@@ -89,7 +116,7 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
     """
     conn = get_db_connection()
     if not conn:
-        return {"error": "Không thể kết nối database."}
+        return {"error": ERROR_DB_CONNECTION}
     try:
         with conn.cursor() as cur:
             # Archive lộ trình active cũ
@@ -104,7 +131,13 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
             # Thêm khóa học
             if course_ids:
                 values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(course_ids)]
-                execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
+                execute_values(
+                    cur,
+                    "INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s",
+                    values,
+                    template=None,
+                    page_size=100
+                )
             conn.commit()
             return {"success": True, "path_id": path_id}
     except Exception as e:
@@ -123,16 +156,17 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
     """
     conn = get_db_connection()
     if not conn:
-        return {"error": "Không thể kết nối database."}
+        return {"error": ERROR_DB_CONNECTION}
     try:
         with conn.cursor() as cur:
             # Kiểm tra quyền sở hữu và trạng thái
-            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id))
-            row = cur.fetchone()
-            if not row:
-                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền cập nhật."}
-            if row[0] != 'ACTIVE':
-                return {"error": "Chỉ có thể cập nhật lộ trình đang hoạt động."}
+            has_access, current_status = _check_path_access(cur, path_id, user_id, 'ACTIVE')
+            if not has_access:
+                if current_status is None:
+                    return {"error": ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION}
+                else:
+                    return {"error": ERROR_ONLY_ACTIVE_PATHS}
+
             # Xây dựng câu lệnh update
             fields = []
             params = []
@@ -142,9 +176,10 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
             if primary_goal: fields.append('primary_goal = %s'); params.append(primary_goal)
             if focus_skill: fields.append('focus_skill = %s'); params.append(focus_skill)
             if not fields:
-                return {"error": "Không có trường nào để cập nhật."}
+                return {"error": ERROR_NO_FIELDS_TO_UPDATE}
             params.append(path_id)
-            cur.execute(f'UPDATE learning_path SET {", ".join(fields)}, last_updated_at = NOW() WHERE id = %s;', tuple(params))
+            query = 'UPDATE learning_path SET {}, last_updated_at = NOW() WHERE id = %s;'.format(", ".join(fields))
+            cur.execute(query, tuple(params))
             conn.commit()
             return {"success": True}
     except Exception as e:
@@ -163,15 +198,16 @@ def archive_learning_path(path_id: int, user_id: str) -> dict:
     """
     conn = get_db_connection()
     if not conn:
-        return {"error": "Không thể kết nối database."}
+        return {"error": ERROR_DB_CONNECTION}
     try:
         with conn.cursor() as cur:
-            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id))
-            row = cur.fetchone()
-            if not row:
-                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] != 'ACTIVE':
-                return {"error": "Chỉ có thể archive lộ trình đang hoạt động."}
+            has_access, current_status = _check_path_access(cur, path_id, user_id, 'ACTIVE')
+            if not has_access:
+                if current_status is None:
+                    return {"error": ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION}
+                else:
+                    return {"error": ERROR_ONLY_ARCHIVE_ACTIVE}
+
             cur.execute('UPDATE learning_path SET status = %s, last_updated_at = NOW() WHERE id = %s;', ('ARCHIVED', path_id))
             conn.commit()
             return {"success": True}
@@ -191,21 +227,28 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
     """
     conn = get_db_connection()
     if not conn:
-        return {"error": "Không thể kết nối database."}
+        return {"error": ERROR_DB_CONNECTION}
     try:
         with conn.cursor() as cur:
-            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id))
-            row = cur.fetchone()
-            if not row:
-                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] != 'ACTIVE':
-                return {"error": "Chỉ có thể thêm khóa học vào lộ trình đang hoạt động."}
+            has_access, current_status = _check_path_access(cur, path_id, user_id, 'ACTIVE')
+            if not has_access:
+                if current_status is None:
+                    return {"error": ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION}
+                else:
+                    return {"error": ERROR_ONLY_ADD_TO_ACTIVE}
+
             # Lấy order number lớn nhất hiện có
             cur.execute('SELECT COALESCE(MAX(course_order_number), 0) FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
             last_order = cur.fetchone()[0]
             # Chèn các khóa học mới
             values = [(course_id, path_id, last_order + i + 1) for i, course_id in enumerate(course_ids)]
-            execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
+            execute_values(
+                cur,
+                "INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s",
+                values,
+                template=None,
+                page_size=100
+            )
             cur.execute('UPDATE learning_path SET last_updated_at = NOW() WHERE id = %s;', (path_id,))
             conn.commit()
             return {"success": True}
@@ -225,15 +268,16 @@ def reorder_courses_in_learning_path(path_id: int, user_id: str, ordered_course_
     """
     conn = get_db_connection()
     if not conn:
-        return {"error": "Không thể kết nối database."}
+        return {"error": ERROR_DB_CONNECTION}
     try:
         with conn.cursor() as cur:
-            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id))
-            row = cur.fetchone()
-            if not row:
-                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] != 'ACTIVE':
-                return {"error": "Chỉ có thể sắp xếp lại khóa học trong lộ trình đang hoạt động."}
+            has_access, current_status = _check_path_access(cur, path_id, user_id, 'ACTIVE')
+            if not has_access:
+                if current_status is None:
+                    return {"error": ERROR_PATH_NOT_FOUND_OR_NO_PERMISSION}
+                else:
+                    return {"error": ERROR_ONLY_REORDER_ACTIVE}
+
             for idx, course_id in enumerate(ordered_course_ids):
                 cur.execute('UPDATE course_learning_path SET course_order_number = %s WHERE learning_path_id = %s AND course_id = %s;', (idx+1, path_id, course_id))
             cur.execute('UPDATE learning_path SET last_updated_at = NOW() WHERE id = %s;', (path_id,))

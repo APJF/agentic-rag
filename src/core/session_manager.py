@@ -5,29 +5,6 @@ import psycopg2
 from .database import get_db_connection
 
 
-def get_or_create_user(user_id: str) -> bool:
-    """
-    Kiểm tra user_id có tồn tại không, nếu không thì tạo mới.
-    Đã được cập nhật để khớp với cấu trúc bảng "User" mới.
-    """
-    conn = get_db_connection()
-    if not conn: return False
-    try:
-        with conn.cursor() as cur:
-            query = 'INSERT INTO "User" (id) VALUES (%s) ON CONFLICT (id) DO NOTHING;'
-
-            cur.execute(query, (user_id,))
-
-            conn.commit()
-            print(f"Đã xác thực hoặc tạo người dùng: {user_id}")
-            return True
-    except psycopg2.Error as e:
-        print(f"Lỗi khi get/create user: {e}")
-        conn.rollback()
-        return False
-    finally:
-        if conn: conn.close()
-
 
 def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
     """Lấy danh sách các phiên làm việc của một người dùng,
@@ -108,7 +85,7 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
             # Lấy lịch sử chat
             history = []
             cur.execute(
-                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order ASC;",
+                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order;",
                 (session_id,)
             )
             for row in cur.fetchall():
@@ -142,7 +119,7 @@ def load_chat_history(session_id: int) -> List[BaseMessage]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order ASC;",
+                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order;",
                 (session_id,)
             )
             for row in cur.fetchall():
@@ -209,7 +186,8 @@ def format_history_for_prompt(chat_history: List[BaseMessage]) -> str:
         elif isinstance(message, AIMessage):
             formatted_lines.append(f"Trợ lý: {message.content}")
         else:
-            pass
+            # Handle unknown message types
+            formatted_lines.append(f"Không xác định: {message.content}")
 
     return "\n".join(formatted_lines)
 
@@ -292,14 +270,17 @@ def rewind_last_turn(session_id: int) -> bool:
                     "DELETE FROM chat_messenger WHERE id IN %s;",
                     (ids_to_delete,)
                 )
+                # Update session timestamp to the latest remaining message or NOW() if no messages left
                 cur.execute("""
                             UPDATE chat_session
-                            SET updated_at = (SELECT timestamp
-                            FROM chat_messenger
-                            WHERE session_id = %s
-                            ORDER BY messenger_order DESC
-                                LIMIT 1
-                                )
+                            SET updated_at = COALESCE(
+                                (SELECT created_at
+                                FROM chat_messenger
+                                WHERE session_id = %s
+                                ORDER BY messenger_order DESC
+                                LIMIT 1),
+                                NOW()
+                            )
                             WHERE id = %s;
                             """, (session_id, session_id))
 

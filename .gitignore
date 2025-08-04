@@ -1,3 +1,8 @@
+### IDE and text editor settings ###
+.idea/
+.vscode/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
