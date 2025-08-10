@@ -5,25 +5,21 @@ import psycopg2
 from .database import get_db_connection
 
 
-def get_or_create_user(user_id: str) -> bool:
+def get_user(user_id: str) -> bool:
     """
-    Kiểm tra user_id có tồn tại không, nếu không thì tạo mới.
-    Đã được cập nhật để khớp với cấu trúc bảng "User" mới.
+    Kiểm tra user_id có tồn tại không. Không tạo mới.
     """
+    user_id_int = int(user_id)
     conn = get_db_connection()
     if not conn: return False
     try:
         with conn.cursor() as cur:
-            query = 'INSERT INTO "User" (id) VALUES (%s) ON CONFLICT (id) DO NOTHING;'
-
-            cur.execute(query, (user_id,))
-
-            conn.commit()
-            print(f"Đã xác thực hoặc tạo người dùng: {user_id}")
-            return True
+            query = 'SELECT 1 FROM "users" WHERE id = %s;'
+            cur.execute(query, (user_id_int,))
+            exists = cur.fetchone() is not None
+            return exists
     except psycopg2.Error as e:
-        print(f"Lỗi khi get/create user: {e}")
-        conn.rollback()
+        print(f"Lỗi khi kiểm tra user: {e}")
         return False
     finally:
         if conn: conn.close()
@@ -32,13 +28,14 @@ def get_or_create_user(user_id: str) -> bool:
 def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
     """Lấy danh sách các phiên làm việc của một người dùng,
     sắp xếp theo thời gian cập nhật gần nhất."""
+    user_id_int = int(user_id)
     conn = get_db_connection()
     if not conn: return []
     sessions = []
     try:
         with conn.cursor() as cur:
             query = "SELECT id, session_name, updated_at FROM chat_session WHERE user_id = %s ORDER BY updated_at DESC;"
-            cur.execute(query, (user_id,))
+            cur.execute(query, (user_id_int,))
             rows = cur.fetchall()
             for row in rows:
                 sessions.append({"id": row[0], "session_name": row[1], "updated_at": row[2]})
@@ -55,31 +52,42 @@ def create_new_session(
         session_type: str = 'GENERAL',
         context: Optional[Dict[str, Any]] = None
 ) -> Optional[int]:
-    """
-    Tạo một phiên mới với loại và ngữ cảnh cụ thể.
-    """
+    print(f"[DEBUG] Bắt đầu tạo session cho user_id={user_id}, session_name={session_name}, session_type={session_type}")
+    try:
+        user_id_int = int(user_id)
+    except Exception as e:
+        print(f"[ERROR] Lỗi ép kiểu user_id: {user_id} -> {e}")
+        return None
+
     conn = get_db_connection()
-    if not conn: return None
+    if not conn:
+        print("[ERROR] Không kết nối được database!")
+        return None
     session_id = None
     try:
         with conn.cursor() as cur:
-            # Chuyển đổi context dictionary thành chuỗi JSON nếu nó tồn tại
             context_json = json.dumps(context) if context else None
-
             query = """
                     INSERT INTO chat_session (user_id, session_name, session_type, context)
-                    VALUES (%s, %s, %s, %s) RETURNING id; \
+                    VALUES (%s, %s, %s, %s) RETURNING id;
                     """
-            cur.execute(query, (user_id, session_name, session_type.upper(), context_json))
-
+            cur.execute(query, (user_id_int, session_name, session_type.upper(), context_json))
             session_id = cur.fetchone()[0]
             conn.commit()
-            print(f"Đã tạo phiên '{session_name}' (Loại: {session_type}) với ID: {session_id}")
-    except psycopg2.Error as e:
-        print(f"Lỗi khi tạo phiên mới: {e}")
-        conn.rollback()
+            print(f"[INFO] Đã tạo phiên '{session_name}' (Loại: {session_type}) với ID: {session_id}")
+    except Exception as e:
+        print(f"[ERROR] Lỗi khi tạo phiên mới: {e}")
+        if hasattr(e, 'pgerror'):
+            print(f"[ERROR] pgerror: {e.pgerror}")
+        if hasattr(e, 'diag') and getattr(e.diag, 'message_detail', None):
+            print(f"[ERROR] Chi tiết: {e.diag.message_detail}")
+        if conn:
+            conn.rollback()
     finally:
+        print("[DEBUG] Đóng kết nối database sau khi tạo session.")
         if conn: conn.close()
+    if session_id is None:
+        print("[ERROR] create_new_session trả về None!")
     return session_id
 
 
@@ -320,7 +328,7 @@ def rewind_last_turn(session_id: int) -> bool:
 
 
 def find_session(
-        user_id: str,
+        user_id: int,
         session_type: str,
         context: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:

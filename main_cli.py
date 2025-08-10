@@ -4,7 +4,7 @@ from typing import Optional
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.core.session_manager import (
-    get_or_create_user,
+    get_user,
     list_sessions_for_user,
     create_new_session,
     load_chat_history,
@@ -132,7 +132,7 @@ def main():
         print("Tên người dùng không được để trống. Thoát chương trình.")
         sys.exit(1)
 
-    get_or_create_user(user_id)
+    get_user(user_id)
 
     while True:
         session_id_to_run = select_or_create_session(user_id)

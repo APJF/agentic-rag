@@ -138,3 +138,12 @@ class SpeakingChatRequest(BaseModel):
     level: Optional[str]
     target: Optional[str]
     hobby: Optional[str]
+
+class ChatMultiResult(BaseModel):
+    intent: str
+    ai_response: str
+    redirect_link: Optional[str] = None
+
+class ChatMultiResponse(BaseModel):
+    session_id: int
+    results: List[ChatMultiResult]

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, HTTPException
 from ..schemas import ChatRequest, ChatResponse, ChatEditRequest, ChatInitiateRequest, ChatInitiateResponse
 from ...features.qna.agent import initialize_qna_agent
 from ...features.planner.agent import initialize_planning_agent # Cần để điều phối
+from ...features.planner.tools import set_session_user_id
 from ...core.session_manager import load_session_data, add_new_messages, rewind_last_turn, create_new_session
 from ...core.llm import get_llm # Cần để tự đặt tên session
 from langchain_core.messages import HumanMessage, AIMessage
@@ -64,6 +65,8 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     }
 
     if session_type == "PLANNER":
+        # Đảm bảo tool Planner luôn dùng đúng user_id
+        set_session_user_id(input_data["user_id"])
         result = planner_agent_executor.invoke(input_data)
     else:  # Mặc định xử lý bằng QnA Agent
         result = qna_agent_executor.invoke(input_data)
@@ -86,12 +89,22 @@ async def invoke_assistant(request: ChatRequest):
     if not session_data:
         raise HTTPException(status_code=404, detail=f"Phiên ID {request.session_id} không tồn tại.")
 
+    session_type = session_data.get("type", "GENERAL").upper()
+
     input_data = {
         "user_id": session_data["user_id"],
         "input": request.user_input,
         "chat_history": session_data["history"]
     }
-    result = qna_agent_executor.invoke(input_data)
+    
+    # Điều phối đến agent phù hợp
+    if session_type == "PLANNER":
+        # Đảm bảo tool Planner luôn dùng đúng user_id
+        set_session_user_id(input_data["user_id"])
+        result = planner_agent_executor.invoke(input_data)
+    else: # Mặc định là QnA
+        result = qna_agent_executor.invoke(input_data)
+        
     ai_response_text = result.get('output', "Lỗi: Agent không có output.")
 
     human_msg = HumanMessage(content=request.user_input)

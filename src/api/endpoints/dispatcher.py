@@ -1,14 +1,16 @@
 from fastapi import APIRouter, Body, HTTPException
-from ..schemas import ChatRequest, ChatResponse, ChatEditRequest
+from ..schemas import ChatRequest, ChatResponse, ChatEditRequest, ChatMultiResponse, ChatMultiResult
 from ...features.qna.agent import initialize_qna_agent
 from ...features.planner.agent import initialize_planning_agent
 from ...features.learning.agent import initialize_learning_agent
 from ...features.reviewer.agent import initialize_reviewer_agent
 from ...features.speaking.agent import initialize_speaking_agent
+from ...features.planner.tools import set_session_user_id
 from ...core.session_manager import create_new_session, add_new_messages, load_session_data, rewind_last_turn
 from ...core.database import execute_sql_query
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
+import re
 
 router = APIRouter()
 
@@ -18,69 +20,140 @@ learning_agent_executor = initialize_learning_agent()
 reviewer_agent_executor = initialize_reviewer_agent()
 speaking_agent_executor = initialize_speaking_agent()
 
-# Hàm detect intent bằng LLM thực tế (OpenAI, có thể thay model khác)
-def detect_intent_llm(user_input: str) -> str:
-    prompt = (
-        "Bạn là hệ thống phân loại ý định cho chatbot đa năng. "
-        "Hãy đọc câu hỏi sau và trả về 1 trong các intent sau: "
-        "qna, planner, speaking, reviewer, learning.\n"
-        "Câu hỏi: '{user_input}'\n"
-        "Chỉ trả về đúng 1 từ khóa intent."
-    )
-    llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo")
-    result = llm.invoke(prompt.format(user_input=user_input))
-    intent = result.content.strip().lower()
-    if intent not in ["qna", "planner", "speaking", "reviewer", "learning"]:
-        return "qna"
-    return intent
+# Hàm tách nhiều yêu cầu trong 1 message (dùng LLM hoặc rule đơn giản)
+def split_user_requests(user_input: str) -> list:
+    # Tách theo dấu chấm, xuống dòng, hoặc các từ khóa phổ biến
+    # Có thể thay bằng LLM nếu muốn thông minh hơn
+    parts = re.split(r'[\n\.;!?]+', user_input)
+    return [p.strip() for p in parts if p.strip()]
 
-@router.post("/chat", response_model=ChatResponse)
+# Hàm detect intent cho từng yêu cầu, trả về intent, ai_response, redirect_link
+def detect_intent_llm_multi(user_input: str, session_type: str = None) -> list:
+    llm = ChatOpenAI(temperature=0, model="gpt-4.1")
+    # Prompt cho LLM: tách yêu cầu, xác định intent, gợi ý link
+    prompt = (
+        "Bạn là hệ thống phân tích yêu cầu người dùng cho chatbot đa năng. "
+        "Hãy đọc đoạn sau, tách thành từng yêu cầu nhỏ (nếu có), với mỗi yêu cầu hãy trả về JSON gồm: "
+        "{intent, ai_response, redirect_link}. "
+        "Nếu yêu cầu là tạo lộ trình, không biết học gì, nên học gì hay những bên tương tự thì, hãy trả về intent là planner, redirect_link là /roadmap. "
+        "Các intent hợp lệ: qna, planner, speaking, reviewer, learning. "
+        "Nếu intent là planner thì redirect_link là /roadmap, qna là /chatbot, speaking là /speaking, reviewer là /review, learning là /learning. "
+        "Nếu không xác định được intent thì để là qna. "
+        "Đầu ra là 1 mảng JSON.\n"
+        f"Đầu vào: {user_input}"
+    )
+    result = llm.invoke(prompt)
+    # Parse kết quả JSON
+    import json
+    try:
+        parsed = json.loads(result.content)
+        if isinstance(parsed, list):
+            return parsed
+        else:
+            return [parsed]
+    except Exception as e:
+        # Nếu lỗi, fallback về 1 intent qna
+        return [{"intent": "qna", "ai_response": result.content, "redirect_link": "/chatbot"}]
+
+# Rule cứng phát hiện intent planner
+ROADMAP_KEYWORDS = [
+    "lộ trình", "roadmap", "kế hoạch học", "plan học", "học gì", "nên học", "học như thế nào",
+    "học jlpt", "thi jlpt", "học n3", "học n2", "học n1", "làm sao để thi", "chuẩn bị thi"
+]
+def detect_intent_with_keywords(user_input: str) -> str:
+    user_input_lower = user_input.lower()
+    if any(kw in user_input_lower for kw in ROADMAP_KEYWORDS):
+        return "planner"
+    return None
+
+@router.post("/chat", response_model=ChatMultiResponse)
 async def chat_dispatcher(request: ChatRequest = Body(...)):
     session_id = request.session_id
-    session_type = None
-    # Nếu frontend gửi kèm redirect_to (chuyển agent), tạo session mới với intent mới và gửi lại câu hỏi gốc
-    if hasattr(request, "redirect_to") and getattr(request, "redirect_to", None):
-        intent = request.redirect_to
-        session_id = create_new_session(request.user_id, f"Session {intent}", session_type=intent)
-        user_input = getattr(request, "original_question", request.user_input)
-    else:
-        user_input = request.user_input
-        if session_id:
-            session_data = load_session_data(session_id)
-            if not session_data:
-                raise HTTPException(status_code=404, detail=f"Phiên ID {session_id} không tồn tại.")
-            session_type = session_data.get("type", None)
-            detected_intent = detect_intent_llm(user_input)
-            if detected_intent and session_type and detected_intent != session_type.lower():
-                return {
-                    "session_id": session_id,
-                    "ai_response": f"Bạn đang hỏi về chủ đề '{detected_intent}'. Hệ thống sẽ chuyển sang chế độ phù hợp.",
-                    "redirect_to": detected_intent,
-                    "original_question": user_input
-                }
-            intent = session_type.lower() if session_type else detected_intent
+    user_input = request.user_input
+    
+    # Endpoint này yêu cầu phải có session_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id là bắt buộc.")
+
+    # Tải dữ liệu session một lần duy nhất
+    session_data = load_session_data(session_id)
+    if not session_data:
+        raise HTTPException(status_code=404, detail=f"Phiên ID {session_id} không tồn tại.")
+        
+    # Lấy thông tin cần thiết từ session
+    user_id = session_data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=500, detail=f"Không tìm thấy user_id trong dữ liệu phiên {session_id}.")
+        
+    session_type = session_data.get("type")
+    chat_history = session_data.get("history", [])
+
+    # Tách các yêu cầu nhỏ từ input của người dùng
+    user_requests = split_user_requests(user_input)
+    results = []
+
+    for req in user_requests:
+        # Xác định intent và các thông tin liên quan
+        intent = detect_intent_with_keywords(req)
+        redirect_link = None
+        
+        if intent == "planner":
+            redirect_link = "/roadmap"
+            ai_response = "Bạn đang hỏi về lộ trình học. Hệ thống sẽ chuyển sang chế độ lập kế hoạch học tập."
         else:
-            intent = detect_intent_llm(user_input)
-            session_id = create_new_session(request.user_id, f"Session {intent}", session_type=intent)
-    agent_map = {
-        "qna": qna_agent_executor,
-        "planner": planner_agent_executor,
-        "learning": learning_agent_executor,
-        "reviewer": reviewer_agent_executor,
-        "speaking": speaking_agent_executor,
-    }
-    agent = agent_map.get(intent)
-    if not agent:
-        return ChatResponse(session_id=session_id, ai_response="Xin lỗi, tôi chưa hỗ trợ chức năng này.")
-    context = request.dict()
-    context["session_id"] = session_id
-    ai_result = agent.invoke({"context": context})
-    ai_response = ai_result.get("output", "Xin hãy cung cấp thêm thông tin.")
-    add_new_messages(session_id, [
-        HumanMessage(content=user_input),
-        AIMessage(content=ai_response)
-    ])
-    return ChatResponse(session_id=session_id, ai_response=ai_response)
+            detected = detect_intent_llm_multi(req)
+            d = detected[0] if detected else {"intent": "qna", "ai_response": "Xin hãy cung cấp thêm thông tin.", "redirect_link": "/chatbot"}
+            intent = d.get("intent", "qna")
+            ai_response = d.get("ai_response", "Xin hãy cung cấp thêm thông tin.")
+            redirect_link = d.get("redirect_link", None)
+
+        # Logic chuyển hướng hoặc giữ nguyên intent dựa trên session
+        if session_type:
+            if session_type.lower() == "planner":
+                intent = "planner"
+                redirect_link = "/roadmap"
+            elif intent != session_type.lower():
+                results.append(ChatMultiResult(intent=intent, ai_response=f"Bạn đang hỏi về chủ đề '{intent}'. Hệ thống sẽ chuyển sang chế độ phù hợp.", redirect_link=redirect_link))
+                continue
+        
+        # Nếu không có session_type (dù hiếm khi xảy ra nếu đã qua các bước trên)
+        if not intent:
+            intent = "qna" # Mặc định
+
+        # Gọi agent phù hợp
+        agent_map = {
+            "qna": qna_agent_executor,
+            "planner": planner_agent_executor,
+            "learning": learning_agent_executor,
+            "reviewer": reviewer_agent_executor,
+            "speaking": speaking_agent_executor,
+        }
+        agent = agent_map.get(intent)
+        if not agent:
+            results.append(ChatMultiResult(intent=intent, ai_response="Xin lỗi, tôi chưa hỗ trợ chức năng này.", redirect_link=redirect_link))
+            continue
+            
+        # Chuẩn bị dữ liệu và gọi agent
+        input_data = {
+            "user_id": user_id,
+            "input": req,
+            "chat_history": chat_history,
+        }
+        # Đảm bảo Planner tools nhận đúng user_id
+        if intent == "planner":
+            set_session_user_id(user_id)
+        ai_result = agent.invoke(input_data)
+        ai_response = ai_result.get("output", ai_response)
+
+        # Cập nhật lịch sử chat và kết quả
+        human_msg = HumanMessage(content=req)
+        ai_msg = AIMessage(content=ai_response)
+        add_new_messages(session_id, [human_msg, ai_msg])
+        chat_history.extend([human_msg, ai_msg])
+
+        results.append(ChatMultiResult(intent=intent, ai_response=ai_response, redirect_link=redirect_link))
+
+    return ChatMultiResponse(session_id=session_id, results=results)
 
 @router.post("/chat/edit_and_resubmit", response_model=ChatResponse)
 async def edit_and_resubmit_message(request: ChatEditRequest = Body(...)):

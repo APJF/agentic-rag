@@ -1,13 +1,9 @@
 # src/api/main.py
 
 from fastapi import FastAPI
-# === BƯỚC 1: IMPORT CORSMiddleware ===
 from fastapi.middleware.cors import CORSMiddleware
-
-# Giả sử bạn có các router này
 from .endpoints import chat, sessions, planner, learning, reviewer, speaking, dispatcher
 
-# Khởi tạo ứng dụng FastAPI
 app = FastAPI(
     title="Trợ lý ảo Tiếng Nhật API",
     description="API cho phép tương tác với hệ thống agent đa chức năng.",
