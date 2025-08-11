@@ -27,50 +27,48 @@ router = APIRouter()
 
 @router.post("/create", response_model=ChatInitiateResponse)
 async def create_session(request: ChatInitiateRequest = Body(...)):
-    """
-    Endpoint tạo session mới, bắt buộc có tin nhắn đầu tiên, tự động sinh tên session, lưu tin nhắn đầu tiên và phản hồi AI.
-    """
     get_user(int(request.user_id))
 
-    # 1. Xác định intent bằng rule + LLM
-    def detect_intent_custom(user_input: str, context: dict = None) -> str:
-        # Ưu tiên context nếu có session_type
-        if context and context.get("session_type"):
-            return str(context["session_type"]).lower()
-        # Ưu tiên context nếu có
-        if context:
-            if context.get("course_id"):
-                return "learning"
-            if context.get("exam_id") or context.get("exam_result_id") or context.get("question_id"):
-                return "reviewer"
-        # Rule: Nếu có mã môn học (ví dụ: M101, N3-01, ...), gán learning
-        if re.search(r'\b(M\d{3}|N\d-\d{2}|course_id\s*:\s*\w+)\b', user_input, re.IGNORECASE):
-            return "learning"
-        # Rule: Nếu có từ khóa chữa/sửa/dịch câu + gắn với bài kiểm tra cụ thể
-        if re.search(r'(chữa|sửa|giải thích|dịch).*câu.*(bài kiểm tra|exam|exam_id|exam_result_id|question_id)', user_input, re.IGNORECASE):
-            return "reviewer"
-        # Rule: Nếu chỉ có từ khóa dịch/sửa/chữa câu (không gắn bài kiểm tra), để qna
-        if re.search(r'(chữa|sửa|giải thích|dịch).*câu', user_input, re.IGNORECASE):
+    def deep_has_key(obj: dict, keys: List[str]) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        for k, v in obj.items():
+            if k in keys:
+                return True
+            if isinstance(v, dict) and deep_has_key(v, keys):
+                return True
+        return False
+
+    # 1) Xác định intent ưu tiên theo request.session_type nếu có
+    intent = (request.session_type or "").lower() if request.session_type else None
+
+    # 2) Nếu chưa có, cố gắng nhận diện theo context (dò sâu)
+    if not intent and request.context:
+        if deep_has_key(request.context, ["exam_id", "exam_result_id", "exam", "exam_result"]):
+            intent = "reviewer"
+        elif deep_has_key(request.context, ["course_id", "material_id", "lesson_id", "material"]):
+            intent = "learning"
+
+    # 3) Nếu vẫn chưa có, dùng rules từ câu hỏi đầu
+    if not intent:
+        def detect_intent_custom(user_input: str, context: dict = None) -> str:
+            # Rule: Nếu có từ khóa lộ trình
+            roadmap_keywords = [
+                "lộ trình", "roadmap", "kế hoạch học", "plan học", "học gì", "nên học", "học như thế nào",
+                "học jlpt", "thi jlpt", "học n3", "học n2", "học n1", "làm sao để thi", "chuẩn bị thi"
+            ]
+            user_input_lower = user_input.lower()
+            if any(kw in user_input_lower for kw in roadmap_keywords):
+                return "planner"
+            # Nếu không match gì
             return "qna"
-        # Rule: Nếu có từ khóa lộ trình, roadmap, học gì, thi JLPT... thì planner
-        roadmap_keywords = [
-            "lộ trình", "roadmap", "kế hoạch học", "plan học", "học gì", "nên học", "học như thế nào",
-            "học jlpt", "thi jlpt", "học n3", "học n2", "học n1", "làm sao để thi", "chuẩn bị thi"
-        ]
-        user_input_lower = user_input.lower()
-        if any(kw in user_input_lower for kw in roadmap_keywords):
-            return "planner"
-        # Nếu không match gì, fallback sang LLM hoặc qna
-        return "qna"
+        intent = detect_intent_custom(request.first_message, request.context)
 
-    intent = detect_intent_custom(request.first_message, request.context)
-
-    # 2. Sinh tên session tự động (có thể dùng LLM hoặc rule đơn giản)
+    # 4) Sinh tên session tự động
     async def generate_session_name(first_message: str, intent: str) -> str:
         from ...core.llm import get_llm
         from langchain_core.prompts import ChatPromptTemplate
         from langchain_core.output_parsers import StrOutputParser
-
         if intent == "speaking":
             return f"Luyện nói: {first_message[:20]}"
         elif intent == "planner":
@@ -79,8 +77,6 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
             return "Chữa bài kiểm tra"
         elif intent == "learning":
             return "Học tập cùng AI"
-
-        # Mặc định: dùng LLM tóm tắt tin nhắn thành tiêu đề ≤5 từ
         llm_instance = get_llm()
         if llm_instance:
             prompt = ChatPromptTemplate.from_template("Hãy tóm tắt câu sau thành một tiêu đề không quá 5 từ: '{text}'")
@@ -88,12 +84,12 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
             try:
                 return await chain.ainvoke({"text": first_message})
             except Exception:
-                pass  # fallback bên dưới
+                pass
         return f"Chat: {first_message[:20]}"
 
     session_name = await generate_session_name(request.first_message, intent)
 
-    # 3. Tạo session mới trong DB
+    # 5) Tạo session
     session_id = create_new_session(
         user_id=int(request.user_id),
         session_name=session_name,
@@ -103,17 +99,11 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
     if not session_id:
         raise HTTPException(status_code=500, detail="Không thể tạo phiên mới.")
 
-    # 4. Lưu tin nhắn đầu tiên của người dùng
+    # 6) Lưu tin nhắn đầu tiên
     human_msg = HumanMessage(content=request.first_message)
     add_new_messages(session_id, [human_msg])
 
-    # 5. Gọi agent phù hợp để lấy phản hồi AI đầu tiên
-    from ...features.planner.tools import set_session_user_id
-
-    # Đảm bảo Planner tools nhận đúng user_id
-    if intent == "planner":
-        set_session_user_id(int(request.user_id))
-
+    # 7) Gọi agent phù hợp với context đính kèm
     agent_map = {
         "qna": initialize_qna_agent(),
         "planner": initialize_planning_agent(),
@@ -125,16 +115,21 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
     input_data = {
         "user_id": int(request.user_id),
         "input": request.first_message,
-        "chat_history": [human_msg]
+        "chat_history": [human_msg],
+        "context": request.context or {}
     }
+
+    # Đảm bảo Planner tools nhận đúng user_id
+    if intent == "planner":
+        from ...features.planner.tools import set_session_user_id
+        set_session_user_id(int(request.user_id))
+
     result = agent.invoke(input_data)
     ai_response_text = result.get('output', "Xin hãy cung cấp thêm thông tin.")
 
-    # 6. Lưu tin nhắn trả lời của AI
     ai_msg = AIMessage(content=ai_response_text)
     add_new_messages(session_id, [ai_msg])
 
-    # 7. Trả về session_id, session_name, ai_response
     return ChatInitiateResponse(
         session_id=session_id,
         session_name=session_name,

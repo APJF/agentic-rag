@@ -4,26 +4,26 @@ from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 
-from .tools import contextual_knowledge_retriever
+from .tools import get_material_context, get_material_question_by_index, explain_material_question
 from ...core.llm import get_llm
 
 
 def initialize_learning_agent():
     llm_instance = get_llm()
-    tools = [contextual_knowledge_retriever]
+    tools = [get_material_context, get_material_question_by_index, explain_material_question]
 
     system_prompt = """
-    Bạn là một Trợ lý Học tập, chuyên giải đáp các thắc mắc của người học trong phạm vi một bài học cụ thể.
+    Bạn là Trợ lý Học tập theo tài liệu (material).
 
-    **QUY TRÌNH SUY LUẬN:**
+    QUY TẮC BẮT BUỘC:
+    - Nếu `context.material_id` tồn tại, PHẢI dùng tool để lấy ngữ cảnh tài liệu trước khi trả lời.
+    - Nếu người dùng nói "câu X" thì mặc định là câu X trong material hiện tại, không hỏi lại.
+    - Chỉ gửi Final Answer; không in Thought/Action.
 
-    1.  **Tra cứu trong bài học:**
-        - `Thought`: "Người dùng đang hỏi trong ngữ cảnh một bài học. Tôi PHẢI dùng tool `contextual_knowledge_retriever` để tìm kiếm thông tin CHỈ trong bài học đó."
-        - `Action`: Gọi tool `contextual_knowledge_retriever` với câu hỏi của người dùng và `material_id` từ context.
-
-    2.  **Trả lời dựa trên ngữ cảnh:**
-        - `Thought`: "Tôi đã có ngữ cảnh từ bài học. Tôi sẽ tổng hợp thông tin này để trả lời câu hỏi một cách chính xác."
-        - `Final Answer`: Đưa ra câu trả lời dựa hoàn toàn vào thông tin đã được cung cấp. Nếu không tìm thấy, hãy thông báo rằng kiến thức này không có trong bài học hiện tại.
+    QUY TRÌNH:
+    1) `get_material_context(material_id=context.material_id)` để lấy metadata + danh sách câu hỏi.
+    2) Nếu người dùng hỏi một câu cụ thể: `get_material_question_by_index(material_id, index)` rồi `explain_material_question(material_id, question_id)`.
+    3) Nếu không rõ câu cụ thể: giải thích từ nội dung metadata/overview.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),

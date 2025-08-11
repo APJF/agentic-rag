@@ -109,12 +109,18 @@ async def chat_dispatcher(request: ChatRequest = Body(...)):
 
         # Logic chuyển hướng hoặc giữ nguyên intent dựa trên session
         if session_type:
-            if session_type.lower() == "planner":
-                intent = "planner"
-                redirect_link = "/roadmap"
-            elif intent != session_type.lower():
-                results.append(ChatMultiResult(intent=intent, ai_response=f"Bạn đang hỏi về chủ đề '{intent}'. Hệ thống sẽ chuyển sang chế độ phù hợp.", redirect_link=redirect_link))
-                continue
+            # GHIM intent theo loại phiên đã tạo, không cho phép lệch sang intent khác
+            session_intent = session_type.lower()
+            intent = session_intent
+            # Gợi ý link tương ứng intent của phiên (nếu FE cần dùng)
+            default_links = {
+                "planner": "/roadmap",
+                "reviewer": "/review",
+                "learning": "/learning",
+                "speaking": "/speaking",
+                "qna": "/chatbot",
+            }
+            redirect_link = default_links.get(session_intent)
         
         # Nếu không có session_type (dù hiếm khi xảy ra nếu đã qua các bước trên)
         if not intent:
@@ -138,6 +144,7 @@ async def chat_dispatcher(request: ChatRequest = Body(...)):
             "user_id": user_id,
             "input": req,
             "chat_history": chat_history,
+            "context": session_data.get("context", {})
         }
         # Đảm bảo Planner tools nhận đúng user_id
         if intent == "planner":
