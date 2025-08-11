@@ -13,7 +13,7 @@ class ExamDataInput(BaseModel):
 
 @tool(args_schema=ExamDataInput)
 def get_exam_submission_details(exam_result_id: Union[str, int]) -> Dict[str, Any]:
-    """Lấy toàn bộ thông tin bài làm: exam_id, điểm, thời gian, danh sách câu hỏi, đáp án đúng và lựa chọn của người dùng."""
+    """Lấy toàn bộ thông tin bài làm: exam_id, điểm, thời gian, danh sách câu hỏi (kèm scope), đáp án đúng và lựa chọn của người dùng."""
     exam_info_query = """
         SELECT er.id,
                er.score,
@@ -33,9 +33,11 @@ def get_exam_submission_details(exam_result_id: Union[str, int]) -> Dict[str, An
 
     exam_id = exam_info[0]['exam_id']
 
+    # Sắp xếp theo scope: KANJI/VOCAB trước, rồi GRAMMAR, sau đó OTHER; tiếp theo số thứ tự ở cuối question_id nếu có
     questions_query = """
         SELECT
             t.question_id,
+            t.scope,
             t.question_index,
             t.question_text,
             t.correct_option_id,
@@ -46,10 +48,11 @@ def get_exam_submission_details(exam_result_id: Union[str, int]) -> Dict[str, An
         FROM (
             SELECT
                 eq.question_id,
+                COALESCE(UPPER(q.scope), 'OTHER') AS scope,
                 ROW_NUMBER() OVER (ORDER BY
                     CASE
-                        WHEN eq.question_id ILIKE %(kv)s THEN 1
-                        WHEN eq.question_id ILIKE %(g)s THEN 2
+                        WHEN LOWER(q.scope) IN ('kanji','vocab') THEN 1
+                        WHEN LOWER(q.scope) = 'grammar' THEN 2
                         ELSE 99
                     END,
                     COALESCE(NULLIF(substring(eq.question_id from '.*-(\\d+)$'), '')::int, 0)
@@ -76,8 +79,6 @@ def get_exam_submission_details(exam_result_id: Union[str, int]) -> Dict[str, An
     questions = execute_sql_query(questions_query, {
         "exam_result_id": exam_result_id,
         "exam_id": exam_id,
-        "kv": "%-KV-%",
-        "g": "%-G-%",
     })
 
     submission_details = exam_info[0]
@@ -92,7 +93,7 @@ class QuestionByIndexInput(BaseModel):
 
 @tool(args_schema=QuestionByIndexInput)
 def get_question_by_index(exam_id: Union[str, int], index: int) -> Dict[str, Any]:
-    """Resolve câu hỏi theo thứ tự (1-based) trong một đề thi (KV trước G), trả về question_id và index."""
+    """Resolve câu hỏi theo thứ tự (1-based) trong một đề thi (ưu tiên scope KANJI/VOCAB trước GRAMMAR), trả về question_id và index."""
     rows = execute_sql_query(
         """
         SELECT question_id, question_index FROM (
@@ -100,18 +101,19 @@ def get_question_by_index(exam_id: Union[str, int], index: int) -> Dict[str, Any
                 eq.question_id,
                 ROW_NUMBER() OVER (ORDER BY
                     CASE
-                        WHEN eq.question_id ILIKE %(kv)s THEN 1
-                        WHEN eq.question_id ILIKE %(g)s THEN 2
+                        WHEN LOWER(q.scope) IN ('kanji','vocab') THEN 1
+                        WHEN LOWER(q.scope) = 'grammar' THEN 2
                         ELSE 99
                     END,
                     COALESCE(NULLIF(substring(eq.question_id from '.*-(\\d+)$'), '')::int, 0)
                 ) AS question_index
             FROM exam_question eq
+            LEFT JOIN question q ON q.id = eq.question_id
             WHERE eq.exam_id = %(exam_id)s
         ) t
         WHERE t.question_index = %(index)s;
         """,
-        {"exam_id": exam_id, "index": index, "kv": "%-KV-%", "g": "%-G-%"}
+        {"exam_id": exam_id, "index": index}
     )
     if not rows:
         return {"error": "Không tìm thấy câu theo index."}
@@ -148,10 +150,11 @@ class ExplainQuestionInput(BaseModel):
 def explain_question(exam_id: Union[str, int], question_id: Union[str, int], selected_option_id: Optional[Union[str, int]] = None) -> Dict[str, Any]:
     """Trình bày câu hỏi, đáp án đúng (từ option.is_correct) và nếu có, so sánh với lựa chọn của người dùng (selected_option_id)."""
     q = execute_sql_query(
-        'SELECT content AS question_text FROM question WHERE id = %(question_id)s;',
+        'SELECT content AS question_text, scope FROM question WHERE id = %(question_id)s;',
         {"question_id": question_id}
     )
     question_text = q[0]["question_text"] if q else None
+    scope = (q[0]["scope"].upper() if q and q[0].get("scope") else None)
 
     correct = execute_sql_query(
         'SELECT id, content FROM option WHERE question_id = %(question_id)s AND is_correct = true LIMIT 1;',
@@ -170,6 +173,7 @@ def explain_question(exam_id: Union[str, int], question_id: Union[str, int], sel
 
     return {
         "success": True,
+        "scope": scope,
         "question": question_text,
         "correct_option": {"id": correct_id, "content": correct_content},
         "user_option": ({"id": selected_option_id, "content": user_content} if selected_option_id else None),

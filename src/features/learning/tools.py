@@ -2,50 +2,11 @@
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from ...core.database import execute_sql_query
-from ...core.embedding import get_embedding_model
-
-embedding_model = get_embedding_model()
-
-
-class ContextualSearchInput(BaseModel):
-    query: str = Field(description="Câu hỏi của người dùng.")
-    material_id: str = Field(description="ID của tài liệu học tập đang xem để giới hạn phạm vi tìm kiếm.")
-
-
-@tool(args_schema=ContextualSearchInput)
-def contextual_knowledge_retriever(query: str, material_id: str) -> str:
-    """
-    Công cụ RAG theo ngữ cảnh. Chỉ tìm kiếm kiến thức trong phạm vi một
-    tài liệu (Material) cụ thể.
-    """
-    print(f"--- Tool Learning: Đang tra cứu '{query}' trong Material ID '{material_id}' ---")
-    if not embedding_model:
-        return "Lỗi: Model embedding chưa được khởi tạo."
-
-    query_embedding = embedding_model.encode(query).tolist()
-
-    # Câu lệnh SQL có bộ lọc cứng theo material_id (hoặc unit_id tùy thiết kế)
-    query_sql = """
-                SELECT chunk_text
-                FROM "content_chunks"
-                WHERE material_id = %s -- Lọc cứng theo ngữ cảnh
-                ORDER BY embedding <=> %s
-                    LIMIT 3; \
-                """
-    params = (material_id, str(query_embedding))
-    results = execute_sql_query(query_sql, params)
-
-    if not results:
-        return "Không tìm thấy thông tin liên quan trong bài học này."
-
-    formatted_context = "Dưới đây là các thông tin liên quan được tìm thấy trong bài học:\n\n"
-    for i, doc in enumerate(results):
-        formatted_context += f"--- Trích đoạn {i + 1} ---\n{doc.get('chunk_text')}\n\n"
-
-    return formatted_context
+from ...utils.storage_client import download_file_from_r2
+import os
 
 
 class MaterialContextInput(BaseModel):
@@ -55,7 +16,7 @@ class MaterialContextInput(BaseModel):
 @tool(args_schema=MaterialContextInput)
 def get_material_context(material_id: int) -> Dict[str, Any]:
     """Lấy metadata tài liệu và danh sách câu hỏi/bài tập (id, index, tiêu đề ngắn)."""
-    meta = execute_sql_query('SELECT id, title, description FROM material WHERE id = %s;', (material_id,))
+    meta = execute_sql_query('SELECT id, title, description, file_key FROM material WHERE id = %s;', (material_id,))
     if not meta:
         return {"error": "Không tìm thấy material."}
     questions = execute_sql_query(
@@ -63,6 +24,59 @@ def get_material_context(material_id: int) -> Dict[str, Any]:
         (material_id,)
     )
     return {"success": True, "material": meta[0], "questions": questions}
+
+
+class MaterialDownloadInput(BaseModel):
+    material_id: int
+
+
+@tool(args_schema=MaterialDownloadInput)
+def fetch_material_file(material_id: int) -> Dict[str, Any]:
+    """Tải file material từ MinIO (dựa vào material.file_key) về thư mục tạm và trả đường dẫn local. Hỗ trợ PDF/MD/TXT."""
+    row = execute_sql_query('SELECT file_key FROM material WHERE id = %s;', (material_id,))
+    if not row or not row[0].get('file_key'):
+        return {"error": "Material chưa có file_key."}
+    file_key = row[0]['file_key']
+    tmp_path = os.path.join("/tmp", os.path.basename(file_key))
+    ok = download_file_from_r2(file_key, tmp_path)
+    if not ok:
+        return {"error": "Không thể tải file từ MinIO."}
+    return {"success": True, "local_path": tmp_path}
+
+
+class MaterialExtractInput(BaseModel):
+    local_path: str
+
+
+@tool(args_schema=MaterialExtractInput)
+def extract_text_from_material(local_path: str) -> Dict[str, Any]:
+    """Đọc nội dung văn bản từ file PDF/MD/TXT đã tải. Trả về text (cắt ngắn nếu quá dài)."""
+    if not os.path.exists(local_path):
+        return {"error": "File không tồn tại."}
+    text = ""
+    if local_path.lower().endswith(".pdf"):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(local_path)
+            pages = []
+            for p in reader.pages:
+                pages.append(p.extract_text() or "")
+            text = "\n".join(pages)
+        except Exception as e:
+            return {"error": f"Không đọc được PDF: {e}"}
+    elif local_path.lower().endswith((".md", ".txt")):
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception as e:
+            return {"error": f"Không đọc được file văn bản: {e}"}
+    else:
+        return {"error": "Định dạng file chưa hỗ trợ (chỉ PDF/MD/TXT)."}
+
+    # Cắt gọn nếu quá dài
+    if len(text) > 20000:
+        text = text[:20000] + "\n... (đã cắt ngắn)"
+    return {"success": True, "text": text}
 
 
 class MaterialQuestionByIndexInput(BaseModel):

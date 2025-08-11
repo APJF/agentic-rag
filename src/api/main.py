@@ -26,6 +26,7 @@ app.add_middleware(
 app.include_router(sessions.router, prefix="/sessions", tags=["Session Management"])
 app.include_router(planner.router, prefix="/planner", tags=["Learning Path Planner"])
 app.include_router(dispatcher.router, prefix="", tags=["Dispatcher"])
+app.include_router(reviewer.router, prefix="/exam", tags=["Exam Overview"])  # new
 
 @app.get("/", tags=["Root"])
 async def read_root():

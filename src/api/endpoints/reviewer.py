@@ -1,118 +1,116 @@
 # src/api/endpoints/reviewer.py
 
 from fastapi import APIRouter, Body, HTTPException
-from ..schemas import ExamGradeRequest, ExamGradeResponse, ExamResultDetailResponse, ExamAdviceRequest, ExamAdviceResponse, ExamReviewChatRequest, ChatResponse, EssayGradeRequest, EssayGradeResponse, EssayReviewChatRequest
-from ...features.reviewer.agent import initialize_reviewer_agent
-from ...core.session_manager import create_new_session, add_new_messages
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List
 from ...core.database import execute_sql_query
-from langchain_core.messages import HumanMessage, AIMessage
 import json
 
-reviewer_agent_executor = initialize_reviewer_agent()
 router = APIRouter()
 
-@router.post("/grade", response_model=ExamGradeResponse)
-async def grade_exam_submission(request: ExamGradeRequest = Body(...)):
-    user_id = request.user_id
-    exam_id = request.exam_id
-    answers = request.answers  # {question_id: user_answer}
+class OverviewRequest(BaseModel):
+    exam_result_id: str | int = Field(...)
 
-    # 1. Tạo exam_result mới
-    exam_result_id = execute_sql_query(
-        "INSERT INTO exam_result (user_id, exam_id, score, advice, status) VALUES (%s, %s, 0, '', 'SUBMITTED') RETURNING id",
-        (user_id, exam_id)
-    )[0]['id']
-    score = 0
-    advice_parts = []
-    details = []
-    for qid, user_answer in answers.items():
-        correct = execute_sql_query("SELECT correct_answer FROM question WHERE id = %s", (qid,))[0]['correct_answer']
-        is_correct = (user_answer == correct)
-        if not is_correct:
-            advice_parts.append(f"Câu {qid}: Bạn nên xem lại phần này.")
-        # Lưu vào exam_result_detail
-        execute_sql_query(
-            "INSERT INTO exam_result_detail (exam_result_id, question_id, user_answer, is_correct) VALUES (%s, %s, %s, %s)",
-            (exam_result_id, qid, user_answer, is_correct)
-        )
-        details.append({"question_id": qid, "user_answer": user_answer, "is_correct": is_correct, "correct_answer": correct})
-        if is_correct:
-            score += 1
+class SectionStat(BaseModel):
+    section: str
+    total: int
+    correct: int
+    wrong: int
+    accuracy_percent: float
 
-    # 4. Sinh advice tổng thể bằng AI
-    advice = reviewer_agent_executor.invoke({
-        "context": {"exam_result_id": exam_result_id, "score": score, "advice_parts": advice_parts}
-    }).get('output', "Hãy xem lại các câu sai và ôn tập thêm.")
+class OverviewResponse(BaseModel):
+    exam_result_id: str | int
+    advice: Dict[str, Any]
 
-    # 5. Update exam_result với score và advice
+@router.post("/overview", response_model=OverviewResponse)
+async def generate_overview(request: OverviewRequest):
+    info = execute_sql_query(
+        "SELECT exam_id FROM exam_result WHERE id = %(id)s;",
+        {"id": request.exam_result_id}
+    )
+    if not info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài làm.")
+    exam_id = info[0]["exam_id"]
+
+    stats = execute_sql_query(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct,
+               SUM(CASE WHEN NOT is_correct THEN 1 ELSE 0 END) AS wrong
+        FROM exam_result_detail
+        WHERE exam_result_id = %(exam_result_id)s;
+        """,
+        {"exam_result_id": request.exam_result_id}
+    )
+    if not stats:
+        raise HTTPException(status_code=404, detail="Không có chi tiết bài làm.")
+
+    raw_sections = execute_sql_query(
+        """
+        SELECT
+            UPPER(COALESCE(q.scope, 'OTHER')) AS section,
+            COUNT(*) AS total,
+            SUM(CASE WHEN erd.is_correct THEN 1 ELSE 0 END) AS correct,
+            SUM(CASE WHEN NOT erd.is_correct THEN 1 ELSE 0 END) AS wrong
+        FROM exam_result_detail erd
+        JOIN exam_question eq ON erd.question_id = eq.question_id
+        JOIN question q ON q.id = eq.question_id
+        WHERE erd.exam_result_id = %(exam_result_id)s
+          AND eq.exam_id = %(exam_id)s
+        GROUP BY UPPER(COALESCE(q.scope, 'OTHER'))
+        ORDER BY section;
+        """,
+        {"exam_result_id": request.exam_result_id, "exam_id": exam_id}
+    )
+
+    by_section: List[SectionStat] = []
+    for r in raw_sections:
+        total = r["total"] or 0
+        correct = r["correct"] or 0
+        wrong = r["wrong"] or 0
+        acc = round((correct / total) * 100, 2) if total else 0.0
+        by_section.append(SectionStat(section=r["section"], total=total, correct=correct, wrong=wrong, accuracy_percent=acc).model_dump())
+
+    total = stats[0]["total"] or 0
+    correct = stats[0]["correct"] or 0
+    wrong = stats[0]["wrong"] or 0
+    accuracy = round((correct / total) * 100, 2) if total else 0.0
+
+    strengths = [s["section"] for s in by_section if s["accuracy_percent"] >= 70]
+    weaknesses = [s["section"] for s in by_section if s["accuracy_percent"] < 50]
+
+    notes: List[str] = []
+    for w in weaknesses:
+        if w == "KANJI":
+            notes.append("Kanji yếu: ôn bảng Kanji N cấp, tập trung chữ hay nhầm; luyện đọc ghép âm, on-kun.")
+        elif w == "VOCAB":
+            notes.append("Từ vựng yếu: mở rộng chủ điểm tần suất cao, áp dụng flashcard SRS.")
+        elif w == "GRAMMAR":
+            notes.append("Ngữ pháp yếu: luyện trợ từ, cấu trúc N cấp; làm đề theo chủ điểm.")
+        else:
+            notes.append("Cần bổ sung kiến thức phần khác (OTHER).")
+    if strengths:
+        notes.append(f"Phần làm tốt: {', '.join(strengths)}. Duy trì và luyện đề nâng cao.")
+    if not notes:
+        notes.append("Tiếp tục duy trì tốc độ học và luyện đề để cải thiện độ ổn định.")
+
+    advice = {
+        "summary": {
+            "total_questions": total,
+            "correct": correct,
+            "wrong": wrong,
+            "accuracy_percent": accuracy
+        },
+        "by_section": by_section,
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "notes": notes
+    }
+
+    # Lưu vào exam_result.advice
     execute_sql_query(
-        "UPDATE exam_result SET score = %s, advice = %s WHERE id = %s",
-        (score, advice, exam_result_id)
+        "UPDATE exam_result SET advice = %(advice)s WHERE id = %(id)s RETURNING id;",
+        {"id": request.exam_result_id, "advice": advice}
     )
 
-    # 6. Tạo session chat chữa bài
-    session_id = create_new_session(user_id, f"Chữa bài {exam_id}", session_type="EXAM_REVIEW", context={"exam_result_id": exam_result_id})
-    # 7. Lưu lịch sử hỏi đáp (nếu có)
-    add_new_messages(session_id, [
-        HumanMessage(content="Tôi muốn nhận xét về bài làm này."),
-        AIMessage(content=advice)
-    ])
-
-    return ExamGradeResponse(
-        exam_result_id=exam_result_id,
-        score=score,
-        advice=advice,
-        session_id=session_id
-    )
-
-@router.post("/advice", response_model=ExamAdviceResponse)
-async def get_exam_advice(request: ExamAdviceRequest = Body(...)):
-    context = request.dict()
-    advice_json = reviewer_agent_executor.invoke({"context": context}).get('output', {})
-    execute_sql_query(
-        "UPDATE exam_result SET advice = %s WHERE id = %s",
-        (json.dumps(advice_json), request.exam_result_id)
-    )
-    return ExamAdviceResponse(advice=advice_json)
-
-@router.post("/essay/grade", response_model=EssayGradeResponse)
-async def grade_essay(request: EssayGradeRequest = Body(...)):
-    context = request.dict()
-    result = reviewer_agent_executor.invoke({"context": context}).get('output', {})
-    # Lưu result vào bảng essay_result nếu muốn
-    # execute_sql_query("INSERT INTO essay_result ...", (...))
-    return EssayGradeResponse(**result)
-
-@router.post("/essay/chat", response_model=ChatResponse)
-async def chat_essay_review(request: EssayReviewChatRequest = Body(...)):
-    # Tìm hoặc tạo session chat cho bài tự luận này
-    session = execute_sql_query(
-        "SELECT id FROM chat_session WHERE context->>'essay_result_id' = %s", (request.essay_result_id,)
-    )
-    if not session:
-        session_id = create_new_session(request.user_id, f"Chữa bài tự luận {request.essay_result_id}", session_type="ESSAY_REVIEW", context={"essay_result_id": request.essay_result_id})
-    else:
-        session_id = session[0]['id']
-    # Truyền đầy đủ ngữ cảnh bài làm, điểm từng tiêu chí, advice, nội dung bài văn, v.v. vào agent
-    context = request.dict()
-    ai_response = reviewer_agent_executor.invoke({"context": context}).get('output', "Xin hãy cung cấp thêm thông tin.")
-    add_new_messages(session_id, [
-        HumanMessage(content=request.user_input),
-        AIMessage(content=ai_response)
-    ])
-    return ChatResponse(session_id=session_id, ai_response=ai_response)
-
-@router.get("/result/{exam_result_id}", response_model=ExamResultDetailResponse)
-async def get_exam_result_detail(exam_result_id: str):
-    exam_result = execute_sql_query("SELECT * FROM exam_result WHERE id = %s", (exam_result_id,))[0]
-    details = execute_sql_query("SELECT * FROM exam_result_detail WHERE exam_result_id = %s", (exam_result_id,))
-    session = execute_sql_query("SELECT id FROM chat_session WHERE context->>'exam_result_id' = %s", (exam_result_id,))
-    chat_history = []
-    if session:
-        chat_history = execute_sql_query("SELECT * FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order", (session[0]['id'],))
-    return ExamResultDetailResponse(
-        score=exam_result['score'],
-        advice=exam_result['advice'],
-        details=details,
-        chat_history=chat_history
-    )
+    return OverviewResponse(exam_result_id=request.exam_result_id, advice=advice)
