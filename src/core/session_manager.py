@@ -6,9 +6,6 @@ from .database import get_db_connection
 
 
 def get_user(user_id: str) -> bool:
-    """
-    Kiểm tra user_id có tồn tại không. Không tạo mới.
-    """
     user_id_int = int(user_id)
     conn = get_db_connection()
     if not conn: return False
@@ -26,15 +23,13 @@ def get_user(user_id: str) -> bool:
 
 
 def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
-    """Lấy danh sách các phiên làm việc của một người dùng,
-    sắp xếp theo thời gian cập nhật gần nhất."""
     user_id_int = int(user_id)
     conn = get_db_connection()
     if not conn: return []
     sessions = []
     try:
         with conn.cursor() as cur:
-            query = "SELECT id, session_name, updated_at FROM chat_session WHERE user_id = %s ORDER BY updated_at DESC;"
+            query = "SELECT id, name, updated_at FROM session WHERE user_id = %s ORDER BY updated_at DESC;"
             cur.execute(query, (user_id_int,))
             rows = cur.fetchall()
             for row in rows:
@@ -68,7 +63,7 @@ def create_new_session(
         with conn.cursor() as cur:
             context_json = json.dumps(context) if context else None
             query = """
-                    INSERT INTO chat_session (user_id, session_name, session_type, context)
+                    INSERT INTO session (user_id, name, type, context)
                     VALUES (%s, %s, %s, %s) RETURNING id;
                     """
             cur.execute(query, (user_id_int, session_name, session_type.upper(), context_json))
@@ -92,18 +87,14 @@ def create_new_session(
 
 
 def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Tải toàn bộ dữ liệu của một phiên, bao gồm cả lịch sử chat, loại và context.
-    """
     conn = get_db_connection()
     if not conn: return None
 
     session_data = None
     try:
         with conn.cursor() as cur:
-            # Lấy thông tin session và context
             cur.execute(
-                "SELECT user_id, session_type, context FROM chat_session WHERE id = %s;",
+                "SELECT user_id, type, context FROM session WHERE id = %s;",
                 (session_id,)
             )
             session_info = cur.fetchone()
@@ -113,10 +104,9 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
 
             user_id, session_type, context = session_info
 
-            # Lấy lịch sử chat
             history = []
             cur.execute(
-                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order ASC;",
+                "SELECT type, content FROM message WHERE session_id = %s ORDER BY \"order\" ASC;",
                 (session_id,)
             )
             for row in cur.fetchall():
@@ -143,14 +133,13 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
 
 
 def load_chat_history(session_id: int) -> List[BaseMessage]:
-    """Tải lịch sử chat của một phiên từ database bằng ID số của phiên."""
     conn = get_db_connection()
     if not conn: return []
     history = []
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT messenger_type, content FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order ASC;",
+                "SELECT type, content FROM message WHERE session_id = %s ORDER BY \"order\" ASC;",
                 (session_id,)
             )
             for row in cur.fetchall():
@@ -167,24 +156,22 @@ def load_chat_history(session_id: int) -> List[BaseMessage]:
 
 
 def add_new_messages(session_id: int, new_messages: List[BaseMessage]):
-    """Thêm các tin nhắn mới vào một phiên đã có."""
     conn = get_db_connection()
     if not conn: return
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(messenger_order), 0) FROM chat_messenger WHERE session_id = %s;",
+            cur.execute("SELECT COALESCE(MAX(\"order\"), 0) FROM message WHERE session_id = %s;",
                         (session_id,))
             last_order = cur.fetchone()[0]
 
             for i, msg in enumerate(new_messages):
                 message_type = 'human' if isinstance(msg, HumanMessage) else 'ai'
                 cur.execute(
-                    "INSERT INTO chat_messenger (session_id, messenger_type, content, messenger_order) VALUES (%s, %s, %s, %s);",
+                    "INSERT INTO message (session_id, type, content, \"order\") VALUES (%s, %s, %s, %s);",
                     (session_id, message_type, msg.content, last_order + i + 1)
                 )
 
-            # Cập nhật lại thời gian 'updated_at' của session cha
-            cur.execute("UPDATE chat_session SET updated_at = NOW() WHERE id = %s;", (session_id,))
+            cur.execute("UPDATE session SET updated_at = NOW() WHERE id = %s;", (session_id,))
             conn.commit()
     except psycopg2.Error as e:
         print(f"Lỗi khi thêm tin nhắn mới: {e}")
@@ -193,47 +180,14 @@ def add_new_messages(session_id: int, new_messages: List[BaseMessage]):
         if conn: conn.close()
 
 
-def format_history_for_prompt(chat_history: List[BaseMessage]) -> str:
-    """
-    Chuyển đổi một danh sách các đối tượng BaseMessage (HumanMessage, AIMessage)
-    thành một chuỗi văn bản duy nhất, dễ đọc, để đưa vào prompt.
-
-    Hàm này đóng vai trò "phiên dịch" giữa cấu trúc dữ liệu nội bộ và
-    dữ liệu dạng văn bản mà LLM có thể hiểu dễ dàng.
-
-    Args:
-        chat_history: Danh sách các đối tượng tin nhắn từ LangChain.
-
-    Returns:
-        Một chuỗi văn bản định dạng cuộc hội thoại.
-    """
-    if not chat_history:
-        return "Không có lịch sử trò chuyện."
-    formatted_lines = []
-
-    for message in chat_history:
-        if isinstance(message, HumanMessage):
-            formatted_lines.append(f"Người dùng: {message.content}")
-        elif isinstance(message, AIMessage):
-            formatted_lines.append(f"Trợ lý: {message.content}")
-        else:
-            pass
-
-    return "\n".join(formatted_lines)
-
-
 def delete_session(session_id: int) -> bool:
-    """
-    Xóa một phiên trò chuyện và tất cả các tin nhắn liên quan khỏi database.
-    Trả về True nếu xóa thành công, False nếu không tìm thấy phiên.
-    """
     conn = get_db_connection()
     if not conn: return False
 
     deleted_rows = 0
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM chat_session WHERE id = %s;", (session_id,))
+            cur.execute("DELETE FROM session WHERE id = %s;", (session_id,))
             deleted_rows = cur.rowcount
             conn.commit()
             if deleted_rows > 0:
@@ -246,11 +200,8 @@ def delete_session(session_id: int) -> bool:
 
     return deleted_rows > 0
 
+
 def rename_session(session_id: int, new_name: str) -> bool:
-    """
-    Cập nhật lại tên của một phiên trò chuyện.
-    Trả về True nếu cập nhật thành công, False nếu không tìm thấy phiên.
-    """
     conn = get_db_connection()
     if not conn: return False
 
@@ -258,7 +209,7 @@ def rename_session(session_id: int, new_name: str) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE chat_session SET session_name = %s, updated_at = NOW() WHERE id = %s;",
+                "UPDATE session SET name = %s, updated_at = NOW() WHERE id = %s;",
                 (new_name, session_id)
             )
             updated_rows = cur.rowcount
@@ -275,11 +226,6 @@ def rename_session(session_id: int, new_name: str) -> bool:
 
 
 def rewind_last_turn(session_id: int) -> bool:
-    """
-    Xóa 2 tin nhắn cuối cùng (một cặp Human-AI) khỏi một phiên trong database.
-    Hàm này thực hiện hành động "tua lại" một lượt nói.
-    Trả về True nếu xóa thành công, False nếu có lỗi hoặc không có đủ tin nhắn để xóa.
-    """
     conn = get_db_connection()
     if not conn:
         print("[Lỗi] Không thể kết nối DB để tua lại phiên.")
@@ -289,7 +235,7 @@ def rewind_last_turn(session_id: int) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM chat_messenger WHERE session_id = %s ORDER BY messenger_order DESC LIMIT 2;",
+                "SELECT id FROM message WHERE session_id = %s ORDER BY \"order\" DESC LIMIT 2;",
                 (session_id,)
             )
             rows_to_delete = cur.fetchall()
@@ -297,15 +243,15 @@ def rewind_last_turn(session_id: int) -> bool:
             if len(rows_to_delete) >= 2:
                 ids_to_delete = tuple(row[0] for row in rows_to_delete)
                 cur.execute(
-                    "DELETE FROM chat_messenger WHERE id IN %s;",
+                    "DELETE FROM message WHERE id IN %s;",
                     (ids_to_delete,)
                 )
                 cur.execute("""
-                            UPDATE chat_session
+                            UPDATE session
                             SET updated_at = (SELECT timestamp
-                            FROM chat_messenger
+                            FROM message
                             WHERE session_id = %s
-                            ORDER BY messenger_order DESC
+                            ORDER BY \"order\" DESC
                                 LIMIT 1
                                 )
                             WHERE id = %s;
@@ -332,32 +278,24 @@ def find_session(
         session_type: str,
         context: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
-    """
-    Tìm một phiên làm việc duy nhất dựa trên user_id, loại phiên, và ngữ cảnh.
-    Trả về thông tin tóm tắt của phiên nếu tìm thấy, ngược lại trả về None.
-    """
     conn = get_db_connection()
     if not conn: return None
 
     session_info = None
     try:
         with conn.cursor() as cur:
-            # Bắt đầu câu lệnh SQL cơ bản
             query = """
-                    SELECT id, session_name, updated_at
-                    FROM "chat_session"
+                    SELECT id, name, updated_at
+                    FROM "session"
                     WHERE user_id = %s \
-                      AND session_type = %s \
+                      AND type = %s \
                     """
             params = [user_id, session_type.upper()]
 
-            # Thêm điều kiện lọc theo context nếu có
             if context:
-                # Dùng toán tử @> của JSONB để kiểm tra xem context trong DB có chứa context được cung cấp không
                 query += " AND context @> %s"
                 params.append(json.dumps(context))
 
-            # Luôn lấy phiên được cập nhật gần nhất nếu có nhiều kết quả
             query += " ORDER BY updated_at DESC LIMIT 1;"
 
             cur.execute(query, tuple(params))

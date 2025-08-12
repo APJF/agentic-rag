@@ -133,7 +133,6 @@ async def list_sessions(user_id: str = Query(..., description="ID người dùng
 # DETAIL: GET /api/sessions/{id}
 @router.get("/{session_id}", response_model=HistoryResponse)
 async def get_session_detail(session_id: int = Path(...)):
-    # Truy vấn trực tiếp để có id và order
     from ...core.database import get_db_connection
     conn = get_db_connection()
     if not conn:
@@ -142,10 +141,10 @@ async def get_session_detail(session_id: int = Path(...)):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, messenger_type, content, messenger_order
-                FROM chat_messenger
+                SELECT id, type, content, "order"
+                FROM message
                 WHERE session_id = %s
-                ORDER BY messenger_order ASC;
+                ORDER BY "order" ASC;
                 """,
                 (session_id,)
             )

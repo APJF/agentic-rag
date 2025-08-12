@@ -31,18 +31,17 @@ def _insert_message(session_id: int, messenger_type: str, content: str) -> Optio
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(messenger_order), 0) + 1 FROM chat_messenger WHERE session_id = %s;", (session_id,))
+            cur.execute("SELECT COALESCE(MAX(\"order\"), 0) + 1 FROM message WHERE session_id = %s;", (session_id,))
             next_order = cur.fetchone()[0]
             cur.execute(
                 """
-                INSERT INTO chat_messenger (session_id, messenger_type, content, messenger_order)
+                INSERT INTO message (session_id, type, content, "order")
                 VALUES (%s, %s, %s, %s) RETURNING id;
                 """,
                 (session_id, messenger_type, content, next_order)
             )
             message_id = cur.fetchone()[0]
-            # update session updated_at
-            cur.execute("UPDATE chat_session SET updated_at = NOW() WHERE id = %s;", (session_id,))
+            cur.execute("UPDATE session SET updated_at = NOW() WHERE id = %s;", (session_id,))
             conn.commit()
             return message_id
     except Exception:
@@ -60,12 +59,10 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if not session_data:
         raise HTTPException(status_code=404, detail=f"Phiên {request.session_id} không tồn tại.")
 
-    # 1) Lưu message người dùng
     human_id = _insert_message(request.session_id, "human", request.user_input)
     if human_id is None:
         raise HTTPException(status_code=500, detail="Không thể lưu tin nhắn người dùng.")
 
-    # 2) Gọi agent theo session_type
     session_type = (session_data.get("type") or "qna").lower()
     agent_map = {
         "qna": initialize_qna_agent(),
@@ -90,7 +87,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     result = agent.invoke(input_data)
     ai_response_text = result.get("output", "Lỗi: Agent không có output.")
 
-    # 3) Lưu message AI
     ai_id = _insert_message(request.session_id, "ai", ai_response_text)
     if ai_id is None:
         raise HTTPException(status_code=500, detail="Không thể lưu phản hồi AI.")
@@ -110,17 +106,16 @@ async def delete_message(message_id: int = Path(...)):
         raise HTTPException(status_code=500, detail="Không thể kết nối DB.")
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM chat_messenger WHERE id = %s RETURNING session_id;", (message_id,))
+            cur.execute("DELETE FROM message WHERE id = %s RETURNING session_id;", (message_id,))
             row = cur.fetchone()
             if not row:
                 conn.rollback()
                 raise HTTPException(status_code=404, detail="Không tìm thấy message để xoá.")
             session_id = row[0]
-            # cập nhật updated_at về tin nhắn mới nhất nếu còn
             cur.execute(
                 """
-                UPDATE chat_session SET updated_at = (
-                    SELECT MAX(timestamp) FROM chat_messenger WHERE session_id = %s
+                UPDATE session SET updated_at = (
+                    SELECT MAX(timestamp) FROM message WHERE session_id = %s
                 ) WHERE id = %s;
                 """,
                 (session_id, session_id)
