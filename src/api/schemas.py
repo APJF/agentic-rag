@@ -46,6 +46,8 @@ class SessionInfo(BaseModel):
 # --- Schemas cho Lịch sử Chat ---
 
 class Message(BaseModel):
+    id: int
+    order: int
     type: Literal['human', 'ai']
     content: str
 

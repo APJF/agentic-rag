@@ -18,6 +18,8 @@ from .tools import (
     calculate_path_duration,
     get_now_utc7,
     weeks_until_deadline_utc7,
+    get_latest_exam_result_for_exam,
+    confirm_and_update_level,
 )
 from ...core.llm import get_llm
 
@@ -46,6 +48,8 @@ def initialize_planning_agent():
         calculate_path_duration,
         get_now_utc7,
         weeks_until_deadline_utc7,
+        get_latest_exam_result_for_exam,
+        confirm_and_update_level,
     ]
 
     system_prompt =  """
@@ -79,7 +83,7 @@ QUAN TRỌNG:
                 • N4  → "Test-JLPT-N4-exam01"
                 • N5  → "Test-JLPT-N5-exam01"
             - Nếu người dùng chọn "có":
-                • Gửi link: `localhost:5173/exam/{{examId}}/preparation` (thay `{examId}` bằng giá trị ở trên).
+                • Gửi link: `localhost:5173/exam/{{examId}}/preparation` (thay `{{examId}}` bằng giá trị ở trên).
                 • Thông báo họ hoàn thành test xong hãy quay lại để tiếp tục lộ trình.
                 • Dừng lại (không tạo lộ trình nữa).
             - Nếu trả lời "không" hoặc muốn bỏ qua: tiếp tục các bước bên dưới để xây dựng lộ trình trực tiếp.

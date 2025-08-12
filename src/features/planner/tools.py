@@ -39,6 +39,42 @@ from ...core.database import execute_sql_query
 from src.data_processing.manifest_loader import courses_by_level, course_sequence_between
 
 # =====================
+# Helper: phân tích level JLPT từ exam_id và ánh xạ điểm → tier
+# =====================
+
+def _parse_jlpt_level_from_exam_id(exam_id: Union[str, int, None]) -> Optional[str]:
+    if not exam_id:
+        return None
+    value = str(exam_id).upper()
+    for lv in ["N5","N4","N3","N2","N1"]:
+        if lv in value:
+            return lv
+    return None
+
+def _jlpt_level_down(level_main: str) -> str:
+    order = ["N5","N4","N3","N2","N1"]
+    try:
+        idx = order.index(level_main)
+    except ValueError:
+        return level_main
+    return order[max(0, idx-1)]
+
+def _compute_level_from_score(level_main: str, score_percent: float) -> str:
+    if score_percent is None:
+        return f"{level_main}-M"
+    if score_percent >= 80:
+        tier = "H"
+    elif score_percent >= 60:
+        tier = "M"
+    elif score_percent >= 40:
+        tier = "L"
+    else:
+        # Giảm 1 bậc, đặt H
+        level_main = _jlpt_level_down(level_main)
+        tier = "H"
+    return f"{level_main}-{tier}"
+
+# =====================
 # SCHEMA INPUTS
 # =====================
 class CreateLearningPathInput(BaseModel):
@@ -495,3 +531,70 @@ def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> 
     finally:
         if conn:
             conn.close()
+
+# =====================
+# TOOL: Lấy attempt mới nhất cho một exam theo user
+# =====================
+@tool
+def get_latest_exam_result_for_exam(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
+    """Trả về lần làm bài gần nhất của user cho exam_id (ưu tiên submitted trước, sau đó started_at mới nhất)."""
+    user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+    if user_id_int is None:
+        return {"error": "user_id không hợp lệ"}
+    rows = execute_sql_query(
+        """
+        SELECT id, score, status, exam_id, started_at, submitted_at
+        FROM exam_result
+        WHERE user_id = %(user_id)s AND exam_id = %(exam_id)s
+        ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
+        LIMIT 1;
+        """,
+        {"user_id": user_id_int, "exam_id": exam_id}
+    )
+    if not rows:
+        return {"error": "Chưa có lần làm bài nào."}
+    return {"success": True, "data": rows[0]}
+
+# =====================
+# TOOL: Xác nhận và cập nhật level từ attempt mới nhất
+# =====================
+class ConfirmLevelInput(BaseModel):
+    user_id: Union[str, int]
+    exam_id: Union[str, int]
+
+@tool(args_schema=ConfirmLevelInput)
+def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
+    """Lấy lần làm bài mới nhất cho exam_id, suy ra level (H/M/L) theo điểm, và cập nhật users.level."""
+    user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+    if user_id_int is None:
+        return {"error": "user_id không hợp lệ"}
+
+    latest = get_latest_exam_result_for_exam.run({"user_id": user_id_int, "exam_id": exam_id})  # reuse tool logic
+    if not latest or not latest.get("success"):
+        return {"error": latest.get("error", "Không lấy được attempt.")}
+    attempt = latest["data"]
+    level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_id"))
+    if not level_main:
+        return {"error": "Không xác định được level từ exam_id."}
+    score = attempt.get("score")
+    try:
+        score_percent = float(score)
+    except Exception:
+        score_percent = None
+    computed_level = _compute_level_from_score(level_main, score_percent)
+
+    # Cập nhật users.level
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return {"error": "Không kết nối DB"}
+        with conn.cursor() as cur:
+            cur.execute('UPDATE "users" SET level = %s WHERE id = %s;', (computed_level, user_id_int))
+            conn.commit()
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+    return {"success": True, "computed_level": computed_level, "score": score_percent, "exam_level": level_main, "exam_result_id": attempt.get("id")}
