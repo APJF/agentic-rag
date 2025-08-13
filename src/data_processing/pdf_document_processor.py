@@ -16,17 +16,16 @@ from src.core.vector_store_interface import get_db_connection
 # --- Khởi tạo các đối tượng dùng chung ---
 embedding_model = get_embedding_model()
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,  # Giảm chunk size để mỗi chunk tập trung hơn vào một chủ đề
+    chunk_size=500,
     chunk_overlap=100,
     length_function=len,
     add_start_index=True,
 )
 
-# === THAY ĐỔI LỚN: Hàm xử lý giờ nhận thêm level và skill_type ===
 def process_pdf_to_chunks(
     pdf_path: str,
     level: str, # 'N5', 'N4', 'N3'
-    skill_type: str = 'Vocabulary' # Mặc định là từ vựng cho các file hiện tại
+    skill_type: str = 'Vocabulary'
 ) -> List[Dict[str, Any]]:
     """
     Đọc PDF, chunking, tạo embedding và gán metadata quan trọng (level, skill_type).

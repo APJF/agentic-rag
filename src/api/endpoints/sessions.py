@@ -183,3 +183,10 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
 @router.patch("/{session_id}", response_model=SessionInfo)
 async def patch_session(session_id: int, request: SessionUpdateRequest = Body(...)):
     return await put_session(session_id, request)
+
+# DELETE: DELETE /api/sessions/{id}
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session_endpoint(session_id: int = Path(...)):
+    if not delete_session(session_id):
+        raise HTTPException(status_code=404, detail="Phiên không tồn tại hoặc đã bị xóa.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

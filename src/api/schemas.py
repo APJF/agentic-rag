@@ -11,6 +11,7 @@ class SessionInfo(BaseModel):
     session_name: str
     type: Optional[str] = None
     updated_at: datetime
+    created_at: datetime
 
 class SessionListResponse(BaseModel):
     user_id: str
@@ -45,6 +46,7 @@ class SessionInfo(BaseModel):
     session_name: str
     type: Optional[str] = None
     updated_at: datetime
+    created_at: datetime
 # --- Schemas cho Lịch sử Chat ---
 
 class Message(BaseModel):

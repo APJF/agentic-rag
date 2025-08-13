@@ -29,11 +29,11 @@ def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
     sessions = []
     try:
         with conn.cursor() as cur:
-            query = "SELECT id, name, type, updated_at FROM session WHERE user_id = %s ORDER BY updated_at DESC;"
+            query = "SELECT id, name, type, created_at, updated_at FROM session WHERE user_id = %s ORDER BY updated_at DESC;"
             cur.execute(query, (user_id_int,))
             rows = cur.fetchall()
             for row in rows:
-                sessions.append({"id": row[0], "session_name": row[1], "type": row[2], "updated_at": row[3]})
+                sessions.append({"id": row[0], "session_name": row[1], "type": row[2], "created_at": row[3], "updated_at": row[4]})
     except psycopg2.Error as e:
         print(f"Lỗi khi liệt kê các phiên: {e}")
     finally:
@@ -94,7 +94,7 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT user_id, type, context FROM session WHERE id = %s;",
+                "SELECT user_id, type, context, created_at FROM session WHERE id = %s;",
                 (session_id,)
             )
             session_info = cur.fetchone()
@@ -102,7 +102,7 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
                 print(f"[Lỗi] Không tìm thấy session với ID {session_id}")
                 return None
 
-            user_id, session_type, context = session_info
+            user_id, session_type, context, created_at = session_info
 
             history = []
             cur.execute(
@@ -120,7 +120,8 @@ def load_session_data(session_id: int) -> Optional[Dict[str, Any]]:
                 "user_id": user_id,
                 "type": session_type,
                 "context": context or {},
-                "history": history
+                "history": history,
+                "created_at": created_at
             }
             print(f"[Thông báo] Đã tải thành công dữ liệu cho phiên {session_id} (Loại: {session_type})")
 
