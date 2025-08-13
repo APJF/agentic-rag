@@ -564,16 +564,41 @@ class ConfirmLevelInput(BaseModel):
 
 @tool(args_schema=ConfirmLevelInput)
 def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
-    """Lấy lần làm bài mới nhất cho exam_id, suy ra level (H/M/L) theo điểm, và cập nhật users.level."""
+    """Lấy lần làm bài mới nhất cho exam_id theo user, suy ra tier theo điểm, cập nhật users.level và trả về thông tin."""
     user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
     if user_id_int is None:
         return {"error": "user_id không hợp lệ"}
 
-    latest = get_latest_exam_result_for_exam.run({"user_id": user_id_int, "exam_id": exam_id})  # reuse tool logic
-    if not latest or not latest.get("success"):
-        return {"error": latest.get("error", "Không lấy được attempt.")}
-    attempt = latest["data"]
-    level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_id"))
+    # Lấy attempt mới nhất trực tiếp từ DB, hỗ trợ cả exam_id (số) hoặc title (chuỗi)
+    exam_id_num = None
+    exam_title = None
+    try:
+        exam_id_num = int(str(exam_id))
+    except Exception:
+        exam_title = str(exam_id)
+
+    rows = execute_sql_query(
+        """
+        SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
+        FROM exam_result er
+        JOIN exam e ON e.id = er.exam_id
+        WHERE er.user_id = %(user_id)s
+          AND (
+                (%(exam_id_num)s IS NOT NULL AND er.exam_id = %(exam_id_num)s)
+             OR (%(exam_title)s IS NOT NULL AND e.title = %(exam_title)s)
+          )
+        ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
+        LIMIT 1;
+        """,
+        {"user_id": user_id_int, "exam_id_num": exam_id_num, "exam_title": exam_title}
+    )
+    if not rows:
+        return {"error": "Chưa có lần làm bài nào cho exam này."}
+    attempt = rows[0]
+
+    # Suy ra level từ exam_id, chấm tier theo score
+    # Ưu tiên lấy level từ exam_title nếu có, fallback sang exam_id
+    level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_title") or attempt.get("exam_id"))
     if not level_main:
         return {"error": "Không xác định được level từ exam_id."}
     score = attempt.get("score")

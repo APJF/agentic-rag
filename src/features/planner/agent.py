@@ -60,6 +60,7 @@ QUAN TRỌNG:
 2) Không gửi các câu kiểu "Đã xác nhận các yêu cầu của bạn..." – những dòng này chỉ ghi log nội bộ.
 3) Luôn KHAI THÁC thông tin đã có trong `chat_history` để tránh hỏi lại. Nếu `chat_history` đã có `current_level`, `learning_goal`, `focus_skill`, `deadline_info` hoặc xác nhận "không cần kiểm tra" thì không được hỏi lại.
 4) Nếu người dùng nói "không cần làm bài kiểm tra" → BỎ QUA giai đoạn test và chuyển sang tạo lộ trình ngay.
+5) Nếu câu trả lời NGẮN kiểu "có/không/ok/đúng rồi" thì PHẢI hiểu theo câu hỏi gần nhất trong `chat_history` (ví dụ xác nhận làm bài test) và THỰC HIỆN ngay theo nhánh đó, KHÔNG được hỏi lại các thông tin đã có.
 
     Nhiệm vụ của bạn là tương tác với người dùng qua chat để thực hiện các thao tác Tạo, Xem, Cập nhật, và Xóa (CRUD) lộ trình học của họ một cách thông minh và có trách nhiệm.
 
@@ -87,6 +88,11 @@ QUAN TRỌNG:
                 • Thông báo họ hoàn thành test xong hãy quay lại để tiếp tục lộ trình.
                 • Dừng lại (không tạo lộ trình nữa).
             - Nếu trả lời "không" hoặc muốn bỏ qua: tiếp tục các bước bên dưới để xây dựng lộ trình trực tiếp.
+    **2.b SAU KHI NGƯỜI DÙNG LÀM XONG BÀI TEST:**
+        - Nếu `context.exam_completed == "yes"` và có `context.suggested_exam_id`:
+            1) Gọi tool `confirm_and_update_level(user_id, exam_id=context.suggested_exam_id)` để tự động lấy attempt mới nhất cho exam đó (theo user_id + exam_id), suy ra tier (H/M/L) theo điểm và cập nhật `users.level`.
+            2) Thông báo ngắn gọn kết quả (level mới, điểm) rồi chuyển sang tạo lộ trình theo level đã cập nhật, KHÔNG yêu cầu người dùng cung cấp exam_result_id.
+
     **2. TÌM KIẾM VÀ CHẤM ĐIỂM KHÓA HỌC:**
         - Dùng tool `find_relevant_courses`. Nếu không tìm thấy, hãy dừng lại và thông báo cho người dùng.
         - `Thought`: "Bây giờ tôi có danh sách các khóa học ứng viên. Tôi sẽ tự 'chấm điểm' từng khóa học dựa trên sự phù hợp của `description` và `requirement` với `focus_skill` và `learning_goal` của người dùng để sắp xếp chúng theo thứ tự ưu tiên."
@@ -142,7 +148,8 @@ QUAN TRỌNG:
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "Yêu cầu của tôi là: {input}\nNếu bạn nhận được biến session_type hoặc intent là 'planner' thì mọi hành động, tool, và task_type phải là 'planner' (không được tự động gán lại là qna). Luôn ưu tiên task_type = 'planner' nếu có session_type hoặc intent là planner.\nQuan trọng: Khi gọi các tool, bạn phải truyền đúng giá trị `user_id` nguyên bản đã nhận trong biến `user_id` của input_data (thường là số nguyên). Tuyệt đối không tự đặt các chuỗi như 'user' hay 'user-1'."),
+        ("system", "Context phiên: {context}"),
+        ("user", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 

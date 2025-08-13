@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Body, HTTPException, Path, status, Response
+import re
 from pydantic import BaseModel, Field
 from typing import Optional
 from langchain_core.messages import HumanMessage
 
-from ...core.session_manager import load_session_data
+from ...core.session_manager import load_session_data, update_session_context
 from ...core.database import get_db_connection
 from ...features.qna.agent import initialize_qna_agent
 from ...features.planner.agent import initialize_planning_agent
@@ -63,6 +64,25 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if human_id is None:
         raise HTTPException(status_code=500, detail="Không thể lưu tin nhắn người dùng.")
 
+    # Nếu người dùng trả lời ngắn gọn 'có/không', set context để agent hiểu nhánh cần thực hiện
+    normalized = request.user_input.strip().lower()
+    flag_value: Optional[str] = None
+    if normalized in {"có", "co", "yes", "y", "ok", "đúng", "dung"}:
+        flag_value = "yes"
+        update_session_context(request.session_id, {"confirm_previous_question": flag_value})
+    elif normalized in {"không", "khong", "no", "n", "không cần", "khong can"}:
+        flag_value = "no"
+        update_session_context(request.session_id, {"confirm_previous_question": flag_value})
+
+    # Nhận diện người dùng đã làm xong bài test và muốn tiếp tục
+    exam_completed_flag = False
+    if normalized in {
+        "tiếp tục", "tiep tuc", "đã hoàn thành", "da hoan thanh", "hoàn thành", "hoan thanh",
+        "đã xong", "da xong", "xong", "done", "hoàn tất", "hoan tat", "đã làm xong", "da lam xong"
+    }:
+        exam_completed_flag = True
+        update_session_context(request.session_id, {"exam_completed": "yes"})
+
     session_type = (session_data.get("type") or "qna").lower()
     agent_map = {
         "qna": initialize_qna_agent(),
@@ -75,6 +95,9 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if not agent:
         raise HTTPException(status_code=500, detail="Agent không khả dụng.")
 
+    # Reload session_data to get updated context
+    session_data = load_session_data(request.session_id) or session_data
+
     input_data = {
         "user_id": session_data["user_id"],
         "input": request.user_input,
@@ -86,6 +109,24 @@ async def create_message(request: MessageCreateRequest = Body(...)):
 
     result = agent.invoke(input_data)
     ai_response_text = result.get("output", "Lỗi: Agent không có output.")
+
+    # Clear flag để tránh xử lý lặp lại ở lượt sau
+    if flag_value is not None:
+        update_session_context(request.session_id, {"confirm_previous_question": ""})
+
+    # Bắt examId từ link AI đã gửi để lưu vào context, phục vụ lần sau tự check kết quả
+    try:
+        # dạng link: localhost:5173/exam/<examId>/preparation
+        m = re.search(r"exam/([^/]+)/preparation", ai_response_text)
+        if m:
+            exam_id_captured = m.group(1)
+            update_session_context(request.session_id, {"suggested_exam_id": exam_id_captured})
+    except Exception:
+        pass
+
+    # Nếu trước đó set exam_completed, sau khi đã phản hồi thì xóa cờ để tránh lặp
+    if exam_completed_flag:
+        update_session_context(request.session_id, {"exam_completed": ""})
 
     ai_id = _insert_message(request.session_id, "ai", ai_response_text)
     if ai_id is None:

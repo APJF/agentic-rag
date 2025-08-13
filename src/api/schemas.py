@@ -9,6 +9,7 @@ from datetime import datetime
 class SessionInfo(BaseModel):
     id: int
     session_name: str
+    type: Optional[str] = None
     updated_at: datetime
 
 class SessionListResponse(BaseModel):
@@ -42,6 +43,7 @@ class ChatEditRequest(BaseModel):
 class SessionInfo(BaseModel):
     id: int
     session_name: str
+    type: Optional[str] = None
     updated_at: datetime
 # --- Schemas cho Lịch sử Chat ---
 

@@ -29,11 +29,11 @@ def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
     sessions = []
     try:
         with conn.cursor() as cur:
-            query = "SELECT id, name, updated_at FROM session WHERE user_id = %s ORDER BY updated_at DESC;"
+            query = "SELECT id, name, type, updated_at FROM session WHERE user_id = %s ORDER BY updated_at DESC;"
             cur.execute(query, (user_id_int,))
             rows = cur.fetchall()
             for row in rows:
-                sessions.append({"id": row[0], "session_name": row[1], "updated_at": row[2]})
+                sessions.append({"id": row[0], "session_name": row[1], "type": row[2], "updated_at": row[3]})
     except psycopg2.Error as e:
         print(f"Lỗi khi liệt kê các phiên: {e}")
     finally:
@@ -316,3 +316,30 @@ def find_session(
         if conn: conn.close()
 
     return session_info
+
+
+def update_session_context(session_id: int, updates: Dict[str, Any]) -> bool:
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE session
+                SET context = COALESCE(context, '{}'::jsonb) || %s::jsonb,
+                    updated_at = NOW()
+                WHERE id = %s;
+                """,
+                (json.dumps(updates), session_id)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as e:
+        print(f"[Lỗi] update_session_context: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()

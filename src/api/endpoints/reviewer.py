@@ -32,15 +32,23 @@ async def generate_overview(request: OverviewRequest):
         raise HTTPException(status_code=404, detail="Không tìm thấy bài làm.")
     exam_id = info[0]["exam_id"]
 
+    # Tính đủ tổng số câu theo đề (kể cả không trả lời) và coi unanswered/null là sai
     stats = execute_sql_query(
         """
         SELECT COUNT(*) AS total,
-               SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct,
-               SUM(CASE WHEN NOT is_correct THEN 1 ELSE 0 END) AS wrong
-        FROM exam_result_detail
-        WHERE exam_result_id = %(exam_result_id)s;
+               SUM(CASE WHEN erd.selected_option_id IS NOT NULL AND erd.selected_option_id = co.id THEN 1 ELSE 0 END) AS correct,
+               SUM(CASE WHEN erd.selected_option_id IS NULL OR erd.selected_option_id <> co.id THEN 1 ELSE 0 END) AS wrong
+        FROM exam_question eq
+        LEFT JOIN question q ON q.id = eq.question_id
+        LEFT JOIN (
+            SELECT o.question_id, o.id
+            FROM option o
+            WHERE o.is_correct = true
+        ) co ON co.question_id = eq.question_id
+        LEFT JOIN exam_result_detail erd ON erd.exam_result_id = %(exam_result_id)s AND erd.question_id = eq.question_id
+        WHERE eq.exam_id = %(exam_id)s;
         """,
-        {"exam_result_id": request.exam_result_id}
+        {"exam_result_id": request.exam_result_id, "exam_id": exam_id}
     )
     if not stats:
         raise HTTPException(status_code=404, detail="Không có chi tiết bài làm.")
@@ -50,13 +58,17 @@ async def generate_overview(request: OverviewRequest):
         SELECT
             UPPER(COALESCE(q.scope, 'OTHER')) AS section,
             COUNT(*) AS total,
-            SUM(CASE WHEN erd.is_correct THEN 1 ELSE 0 END) AS correct,
-            SUM(CASE WHEN NOT erd.is_correct THEN 1 ELSE 0 END) AS wrong
-        FROM exam_result_detail erd
-        JOIN exam_question eq ON erd.question_id = eq.question_id
-        JOIN question q ON q.id = eq.question_id
-        WHERE erd.exam_result_id = %(exam_result_id)s
-          AND eq.exam_id = %(exam_id)s
+            SUM(CASE WHEN erd.selected_option_id IS NOT NULL AND erd.selected_option_id = co.id THEN 1 ELSE 0 END) AS correct,
+            SUM(CASE WHEN erd.selected_option_id IS NULL OR erd.selected_option_id <> co.id THEN 1 ELSE 0 END) AS wrong
+        FROM exam_question eq
+        LEFT JOIN question q ON q.id = eq.question_id
+        LEFT JOIN (
+            SELECT o.question_id, o.id
+            FROM option o
+            WHERE o.is_correct = true
+        ) co ON co.question_id = eq.question_id
+        LEFT JOIN exam_result_detail erd ON erd.exam_result_id = %(exam_result_id)s AND erd.question_id = eq.question_id
+        WHERE eq.exam_id = %(exam_id)s
         GROUP BY UPPER(COALESCE(q.scope, 'OTHER'))
         ORDER BY section;
         """,
@@ -110,7 +122,7 @@ async def generate_overview(request: OverviewRequest):
     # Lưu vào exam_result.advice
     execute_sql_query(
         "UPDATE exam_result SET advice = %(advice)s WHERE id = %(id)s RETURNING id;",
-        {"id": request.exam_result_id, "advice": advice}
+        {"id": request.exam_result_id, "advice": json.dumps(advice, ensure_ascii=False)}
     )
 
     return OverviewResponse(exam_result_id=request.exam_result_id, advice=advice)
