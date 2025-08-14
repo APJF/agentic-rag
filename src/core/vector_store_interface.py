@@ -22,7 +22,7 @@ def get_db_connection():
 def retrieve_relevant_documents_from_db(
     query_text: str,
     top_k: int = 3,
-    table_name: str = "contentchunks", # Sử dụng tên bảng trực tiếp hoặc từ settings
+    table_name: str = settings.RAG_CONTENT_CHUNK_TABLE, # lấy từ settings
     filters: dict = None
 ) -> list[dict]:
     """

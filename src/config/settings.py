@@ -11,10 +11,16 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-3.5-turbo")
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", 384))
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # tuỳ chọn: dùng OpenAI-compatible endpoint
+OPENAI_ORG = os.getenv("OPENAI_ORG")  # tuỳ chọn
 
-RAG_CONTENT_CHUNK_TABLE = os.getenv("RAG_CONTENT_CHUNK_TABLE", "contentchunks")
+# Mặc định dùng các model mới; có thể override qua ENV
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "intfloat/multilingual-e5-base")
+# Lưu ý: e5-base có dimension 768
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", 768))
+
+RAG_CONTENT_CHUNK_TABLE = os.getenv("RAG_CONTENT_CHUNK_TABLE", "content_chunks")
+RAG_SAMPLE_DATA_DIR = os.getenv("RAG_SAMPLE_DATA_DIR")  # tuỳ chọn: override thư mục sample data
 
 CMS_API_BASE_URL = os.getenv("CMS_API_BASE_URL", "http://localhost:8080/api")

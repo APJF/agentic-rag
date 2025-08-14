@@ -83,7 +83,7 @@ QUAN TRỌNG:
                 • N3  → "Test-JLPT-N3-exam01"
                 • N4  → "Test-JLPT-N4-exam01"
                 • N5  → "Test-JLPT-N5-exam01"
-            - Nếu người dùng chọn "có":
+            - Nếu người dùng chọn "có": 
                 • Gửi link: `localhost:5173/exam/{{examId}}/preparation` (thay `{{examId}}` bằng giá trị ở trên).
                 • Thông báo họ hoàn thành test xong hãy quay lại để tiếp tục lộ trình.
                 • Dừng lại (không tạo lộ trình nữa).

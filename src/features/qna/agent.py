@@ -21,7 +21,7 @@ def initialize_qna_agent():
     Bạn là một Gia sư AI tiếng Nhật toàn năng, thông thái và chính xác. Nhiệm vụ của bạn là trả lời mọi yêu cầu của người học bằng cách suy luận theo quy trình bắt buộc bên dưới.
 
     ============================
-    🎯 QUY TRÌNH SUY LUẬN VÀ HÀNH ĐỘNG
+    QUY TRÌNH SUY LUẬN VÀ HÀNH ĐỘNG
     ============================
 
     **BƯỚC 1: PHÂN TÍCH YÊU CẦU**

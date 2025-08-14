@@ -33,7 +33,13 @@ def list_sessions_for_user(user_id: str) -> List[Dict[str, Any]]:
             cur.execute(query, (user_id_int,))
             rows = cur.fetchall()
             for row in rows:
-                sessions.append({"id": row[0], "session_name": row[1], "type": row[2], "created_at": row[3], "updated_at": row[4]})
+                sessions.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "type": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4]
+                })
     except psycopg2.Error as e:
         print(f"Lỗi khi liệt kê các phiên: {e}")
     finally:
@@ -181,6 +187,18 @@ def add_new_messages(session_id: int, new_messages: List[BaseMessage]):
         if conn: conn.close()
 
 
+def _table_exists(cur, table_name: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = %s
+        LIMIT 1;
+        """,
+        (table_name,)
+    )
+    return cur.fetchone() is not None
+
+
 def delete_session(session_id: int) -> bool:
     conn = get_db_connection()
     if not conn: return False
@@ -188,7 +206,20 @@ def delete_session(session_id: int) -> bool:
     deleted_rows = 0
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM session WHERE id = %s;", (session_id,))
+            # Phát hiện tên bảng thực tế để tương thích các schema cũ
+            message_table = "message" if _table_exists(cur, "message") else ("chat_messenger" if _table_exists(cur, "chat_messenger") else None)
+            session_table = "session" if _table_exists(cur, "session") else ("chat_session" if _table_exists(cur, "chat_session") else None)
+
+            if not session_table:
+                print("[Lỗi] Không tìm thấy bảng session/chat_session trong DB.")
+                return False
+
+            # Xóa message trước để tránh vi phạm FK
+            if message_table:
+                cur.execute(f"DELETE FROM {message_table} WHERE session_id = %s;", (session_id,))
+
+            # Sau đó xóa session
+            cur.execute(f"DELETE FROM {session_table} WHERE id = %s;", (session_id,))
             deleted_rows = cur.rowcount
             conn.commit()
             if deleted_rows > 0:
@@ -209,8 +240,13 @@ def rename_session(session_id: int, new_name: str) -> bool:
     updated_rows = 0
     try:
         with conn.cursor() as cur:
+            # Tương thích schema cũ nếu cần
             cur.execute(
-                "UPDATE session SET name = %s, updated_at = NOW() WHERE id = %s;",
+                "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='session' LIMIT 1;")
+            has_session = cur.fetchone() is not None
+            table = 'session' if has_session else 'chat_session'
+            cur.execute(
+                f"UPDATE {table} SET name = %s, updated_at = NOW() WHERE id = %s;",
                 (new_name, session_id)
             )
             updated_rows = cur.rowcount
@@ -225,6 +261,39 @@ def rename_session(session_id: int, new_name: str) -> bool:
 
     return updated_rows > 0
 
+
+def get_session_info(session_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        with conn.cursor() as cur:
+            # Ưu tiên bảng mới 'session', fallback 'chat_session'
+            cur.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='session' LIMIT 1;"
+            )
+            has_session = cur.fetchone() is not None
+            table = 'session' if has_session else 'chat_session'
+            cur.execute(
+                f"SELECT id, name, type, created_at, updated_at FROM {table} WHERE id = %s;",
+                (session_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "name": row[1],
+                "type": row[2],
+                "created_at": row[3],
+                "updated_at": row[4],
+            }
+    except Exception as e:
+        print(f"[Lỗi] get_session_info: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
 
 def rewind_last_turn(session_id: int) -> bool:
     conn = get_db_connection()

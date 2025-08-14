@@ -6,14 +6,11 @@ import psycopg2
 import json
 from psycopg2.extras import execute_values
 from typing import List, Dict, Any
-
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-
 from src.config import settings
 from src.core.embedding import get_embedding_model
 from src.core.vector_store_interface import get_db_connection
 
-# --- Khởi tạo các đối tượng dùng chung ---
 embedding_model = get_embedding_model()
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
@@ -62,9 +59,9 @@ def process_pdf_to_chunks(
                         "embedding": embedding_vector,
                         "source_document_name": doc_name,
                         "original_page_number": page_num,
-                        "level": level, # <<< THÊM LEVEL
-                        "skill_type": skill_type, # <<< THÊM SKILL TYPE
-                        "metadata_json": json.dumps({ # <<< Chuyển sang JSON string
+                        "level": level,
+                        "skill_type": skill_type,
+                        "metadata_json": json.dumps({
                             "lesson": current_lesson_identifier
                         }),
                     }
@@ -96,8 +93,7 @@ def batch_insert_chunks_to_db(chunks_data: List[Dict[str, Any]], conn):
 
     try:
         with conn.cursor() as cur:
-            # === SỬA TÊN BẢNG VÀ CÁC CỘT CHO KHỚP SCHEMA MỚI ===
-            table_name = settings.RAG_CONTENT_CHUNK_TABLE # Dùng tên bảng từ settings
+            table_name = settings.RAG_CONTENT_CHUNK_TABLE
             insert_query = f"""
                 INSERT INTO {table_name} (
                     chunk_text, embedding, source_document_name, original_page_number,
@@ -112,14 +108,12 @@ def batch_insert_chunks_to_db(chunks_data: List[Dict[str, Any]], conn):
         conn.rollback()
 
 
-# === THAY ĐỔI LOGIC CHẠY CHÍNH ĐỂ XỬ LÝ 3 FILE CỤ THỂ ===
 if __name__ == "__main__":
     input_pdfs_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "data", "input_pdfs"
     )
 
-    # Ánh xạ tên file tới level tương ứng
     file_to_level_map = {
         "tuvung_quyendo.pdf": "N5",
         "tuvung_quyenvang.pdf": "N4",
@@ -136,7 +130,6 @@ if __name__ == "__main__":
             full_pdf_path = os.path.join(input_pdfs_dir, filename)
             if os.path.exists(full_pdf_path):
                 print(f"\n{'='*20} Bắt đầu xử lý: {filename} (Level: {level}) {'='*20}")
-                # Giả định tất cả đều là sách từ vựng
                 processed_chunks = process_pdf_to_chunks(full_pdf_path, level=level, skill_type="Vocabulary")
                 batch_insert_chunks_to_db(processed_chunks, db_conn)
             else:

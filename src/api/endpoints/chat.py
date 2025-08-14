@@ -3,10 +3,10 @@
 from fastapi import APIRouter, Body, HTTPException
 from ..schemas import ChatRequest, ChatResponse, ChatEditRequest, ChatInitiateRequest, ChatInitiateResponse
 from ...features.qna.agent import initialize_qna_agent
-from ...features.planner.agent import initialize_planning_agent # Cần để điều phối
+from ...features.planner.agent import initialize_planning_agent
 from ...features.planner.tools import set_session_user_id
 from ...core.session_manager import load_session_data, add_new_messages, rewind_last_turn, create_new_session
-from ...core.llm import get_llm # Cần để tự đặt tên session
+from ...core.llm import get_llm
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -39,7 +39,6 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     elif session_type == "PLANNER":
         session_name = "Tư vấn Lộ trình học"
     else:
-        # (Thêm logic đặt tên cho STUDY và EXAM_REVIEW ở đây)
         session_name = f"Phiên {session_type}"
 
     # 2. Tạo session mới trong DB

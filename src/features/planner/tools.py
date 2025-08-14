@@ -4,7 +4,6 @@ from typing import Optional, Union
 from math import ceil
 from datetime import datetime, timezone, timedelta
 
-# Biến toàn cục lưu user_id thực sự của phiên hiện tại (được set từ endpoint)
 _SESSION_USER_ID: Optional[int] = None
 
 def set_session_user_id(real_user_id: Union[str, int]):
@@ -12,17 +11,14 @@ def set_session_user_id(real_user_id: Union[str, int]):
     global _SESSION_USER_ID
     _SESSION_USER_ID = _parse_user_id(real_user_id)
 
-# Helper to safely convert user_id to integer
 
 def _parse_user_id(user_id: Union[str, int, None]) -> Optional[int]:
     """Chuyển user_id sang int nếu có thể. Trả về None nếu không hợp lệ."""
     if user_id is None:
         return None
     try:
-        # Trường hợp user_id đã là int hoặc chuỗi số
         return int(user_id)
     except (TypeError, ValueError):
-        # Thử trích tất cả các ký tự số trong chuỗi, ví dụ: "user-1" -> "1"
         digits = re.findall(r"\d+", str(user_id))
         if digits:
             try:
@@ -31,16 +27,12 @@ def _parse_user_id(user_id: Union[str, int, None]) -> Optional[int]:
                 return None
     return None
 
-from typing import List, Dict, Any, Optional, Union  # keep order for linter
+from typing import List, Optional, Union
 from psycopg2.extras import execute_values
 from pydantic import BaseModel, Field
 from src.core.vector_store_interface import get_db_connection
 from ...core.database import execute_sql_query
 from src.data_processing.manifest_loader import courses_by_level, course_sequence_between
-
-# =====================
-# Helper: phân tích level JLPT từ exam_id và ánh xạ điểm → tier
-# =====================
 
 def _parse_jlpt_level_from_exam_id(exam_id: Union[str, int, None]) -> Optional[str]:
     if not exam_id:
@@ -69,14 +61,10 @@ def _compute_level_from_score(level_main: str, score_percent: float) -> str:
     elif score_percent >= 40:
         tier = "L"
     else:
-        # Giảm 1 bậc, đặt H
         level_main = _jlpt_level_down(level_main)
         tier = "H"
     return f"{level_main}-{tier}"
 
-# =====================
-# SCHEMA INPUTS
-# =====================
 class CreateLearningPathInput(BaseModel):
     user_id: Union[str, int] = Field(...)
     title: str = Field(...)
@@ -105,16 +93,12 @@ class ReorderCoursesInput(BaseModel):
     user_id: Union[str, int] = Field(...)
     ordered_course_ids: List[str] = Field(...)
 
-# =====================
-# TOOL: Lấy danh sách lộ trình học
-# =====================
 @tool
 def list_learning_paths(user_id: Union[str, int]) -> dict:
     """
     Lấy danh sách lộ trình học (active và archived) của user.
     """
     try:
-        # Ưu tiên user_id thực từ _SESSION_USER_ID (được set bởi endpoint)
         user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
         if user_id_int is None:
             return {"success": True, "data": []}
@@ -124,9 +108,6 @@ def list_learning_paths(user_id: Union[str, int]) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-# =====================
-# TOOL: Lấy chi tiết lộ trình học
-# =====================
 @tool
 def get_learning_path_details(path_id: int, user_id: Union[str, int]) -> dict:
     """
@@ -140,7 +121,6 @@ def get_learning_path_details(path_id: int, user_id: Union[str, int]) -> dict:
         path = execute_sql_query(query, (path_id, user_id_int))
         if not path:
             return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền truy cập."}
-        # Lấy danh sách khóa học
         courses_query = '''
             SELECT C.id, C.title, CLP.course_order_number
             FROM course C
@@ -154,9 +134,6 @@ def get_learning_path_details(path_id: int, user_id: Union[str, int]) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-# =====================
-# TOOL: Tạo lộ trình học mới
-# =====================
 @tool(args_schema=CreateLearningPathInput)
 def create_learning_path(user_id: str, title: str, description: str, target_level: str, primary_goal: str, focus_skill: str, course_ids: List[str]) -> dict:
     """
@@ -172,18 +149,14 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 return {"error": "user_id không hợp lệ."}
             if not course_ids:
                 return {"error": "Danh sách khóa học trống. Hãy gọi tool lấy sequence khóa học trước khi tạo lộ trình."}
-            # Tính duration
             total_hours = _sum_course_duration(cur, course_ids)
-            # Archive STUDYING -> PENDING
             cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
-            # Tạo lộ trình mới
             cur.execute(
                 '''INSERT INTO learning_path (user_id, title, description, target_level, primary_goal, focus_skill, status, created_at, last_updated_at, duration)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s) RETURNING id;''',
                 (user_id_int, title, description, target_level, primary_goal, focus_skill, 'STUDYING', total_hours)
             )
             path_id = cur.fetchone()[0]
-            # Thêm khóa học
             if course_ids:
                 values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(course_ids)]
                 execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
@@ -195,9 +168,6 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
     finally:
         conn.close()
 
-# =====================
-# TOOL: Cập nhật lộ trình học
-# =====================
 @tool(args_schema=UpdateLearningPathInput)
 def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None, description: Optional[str] = None, target_level: Optional[str] = None, primary_goal: Optional[str] = None, focus_skill: Optional[str] = None) -> dict:
     """
@@ -211,14 +181,12 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
             user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
             if user_id_int is None:
                 return {"error": "user_id không hợp lệ."}
-            # Kiểm tra quyền sở hữu và trạng thái
             cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id_int))
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền cập nhật."}
             if row[0] != 'STUDYING':
                 return {"error": "Chỉ có thể cập nhật lộ trình đang hoạt động (STUDYING)."}
-            # Xây dựng câu lệnh update
             fields = []
             params = []
             if title: fields.append('title = %s'); params.append(title)
@@ -238,9 +206,6 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
     finally:
             conn.close()
 
-# =====================
-# TOOL: Archive (soft-delete) lộ trình học
-# =====================
 @tool
 def archive_learning_path(path_id: int, user_id: str) -> dict:
     """
@@ -269,9 +234,6 @@ def archive_learning_path(path_id: int, user_id: str) -> dict:
     finally:
         conn.close()
 
-# =====================
-# TOOL: Thêm khóa học vào lộ trình
-# =====================
 @tool(args_schema=AddCoursesInput)
 def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[str]) -> dict:
     """
@@ -306,9 +268,6 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
     finally:
         conn.close()
 
-# =====================
-# TOOL: Đổi thứ tự khóa học trong lộ trình
-# =====================
 @tool(args_schema=ReorderCoursesInput)
 def reorder_courses_in_learning_path(path_id: int, user_id: str, ordered_course_ids: List[str]) -> dict:
     """
@@ -339,9 +298,6 @@ def reorder_courses_in_learning_path(path_id: int, user_id: str, ordered_course_
     finally:
         conn.close()
 
-# =============================
-# (TEMP) TOOL: find_relevant_courses & calculate_time_constraints
-# =============================
 @tool
 def find_relevant_courses(target_level: str, focus_skill: str, learning_goal: str) -> dict:
     """
@@ -358,7 +314,6 @@ def find_relevant_courses(target_level: str, focus_skill: str, learning_goal: st
         return {"error": "Không thể kết nối database."}
     try:
         with conn.cursor() as cur:
-            # Thử truy vấn có cột level và description
             try:
                 cur.execute(
                     """
@@ -371,7 +326,6 @@ def find_relevant_courses(target_level: str, focus_skill: str, learning_goal: st
                     (target_level, f"%{target_level}%", f"%{focus_skill}%", f"%{focus_skill}%")
                 )
             except Exception:
-                # Fallback: chỉ tìm theo title
                 cur.execute(
                     """
                     SELECT id, title FROM course
@@ -395,21 +349,14 @@ def calculate_time_constraints(deadline_info: str) -> dict:
     """
     [TẠM THỜI] Phân tích deadline (chuỗi) và ước lượng tổng số giờ học còn lại.
     """
-    # Placeholder: giả sử còn 150 giờ học
     return {"success": True, "hours_left": 150}
 
-# =====================
-# TOOL: Lấy thời gian hiện tại theo UTC+7
-# =====================
 @tool
 def get_now_utc7() -> dict:
     """Trả về thời gian hiện tại theo múi giờ UTC+7 ở định dạng ISO 8601."""
     now = datetime.now(timezone.utc) + timedelta(hours=7)
     return {"success": True, "now": now.isoformat()}
 
-# =====================
-# TOOL: Tính số tuần còn lại tới deadline (UTC+7)
-# =====================
 @tool
 def weeks_until_deadline_utc7(deadline_iso: str) -> dict:
     """Tính số tuần còn lại tới deadline theo UTC+7. Nhận chuỗi thời gian ISO 8601; nếu thiếu timezone sẽ giả định UTC+7."""
@@ -417,16 +364,12 @@ def weeks_until_deadline_utc7(deadline_iso: str) -> dict:
         now = datetime.now(timezone.utc) + timedelta(hours=7)
         deadline = datetime.fromisoformat(deadline_iso)
         if deadline.tzinfo is None:
-            # giả định deadline theo UTC+7 nếu thiếu tz
             deadline = deadline.replace(tzinfo=timezone(timedelta(hours=7)))
         delta_days = (deadline - now).days
         return {"success": True, "weeks": max(0, delta_days // 7)}
     except Exception as e:
         return {"error": str(e)}
 
-# =====================
-# TOOL: Lấy level hiện tại của user
-# =====================
 @tool
 def get_user_level(user_id: Union[str, int]) -> dict:
     """Trả về level hiện tại của user từ bảng users.level (ví dụ 'N4-M')."""
@@ -440,9 +383,6 @@ def get_user_level(user_id: Union[str, int]) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-# =====================
-# TOOL: Lấy danh sách môn cho 1 level
-# =====================
 @tool
 def get_courses_for_level(level: str) -> dict:
     """Trả về list course_id cho một level (N5, N4, N3...)."""
@@ -451,9 +391,6 @@ def get_courses_for_level(level: str) -> dict:
         return {"error": f"Không tìm thấy khóa học cho level {level}"}
     return {"success": True, "courses": courses}
 
-# =====================
-# TOOL: Lấy sequence môn giữa hai level (bao gồm)
-# =====================
 @tool
 def get_course_sequence_between_levels(start_level: str, end_level: str) -> dict:
     """Ghép các course từ start_level tới end_level inclusive."""
@@ -462,14 +399,11 @@ def get_course_sequence_between_levels(start_level: str, end_level: str) -> dict
         return {"error": "Không tìm thấy sequence khóa học phù hợp."}
     return {"success": True, "courses": seq}
 
-# =====================
-# TOOL: Sequence +2 level tự động
-# =====================
 @tool
 def get_course_sequence_for_improvement(current_level: str) -> dict:
     """Cho level hiện tại (ví dụ 'N5-M'), trả danh sách course_id để đạt +2 level (N3-M)."""
     try:
-        main_level = current_level.upper().split('-')[0]  # N5, N4...
+        main_level = current_level.upper().split('-')[0]
         order = ["N5", "N4", "N3", "N2", "N1"]
         if main_level not in order:
             return {"error": "Level không hợp lệ"}
@@ -480,9 +414,6 @@ def get_course_sequence_for_improvement(current_level: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-# =====================
-# TOOL: Cập nhật level của user
-# =====================
 @tool
 def update_user_level(user_id: Union[str, int], new_level: str) -> dict:
     """Cập nhật cột level ở bảng users."""
@@ -500,8 +431,6 @@ def update_user_level(user_id: Union[str, int], new_level: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-# Helper: tổng duration khóa học
-
 def _sum_course_duration(cur, course_ids: List[str]) -> float:
     if not course_ids:
         return 0.0
@@ -510,9 +439,6 @@ def _sum_course_duration(cur, course_ids: List[str]) -> float:
     s = cur.fetchone()[0]
     return float(s or 0.0)
 
-# =====================
-# TOOL: Tính tổng duration & ước lượng thời gian học
-# =====================
 @tool
 def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> dict:
     """Trả về tổng giờ học và số tuần ước tính.
@@ -532,9 +458,6 @@ def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> 
         if conn:
             conn.close()
 
-# =====================
-# TOOL: Lấy attempt mới nhất cho một exam theo user
-# =====================
 @tool
 def get_latest_exam_result_for_exam(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
     """Trả về lần làm bài gần nhất của user cho exam_id (ưu tiên submitted trước, sau đó started_at mới nhất)."""
@@ -555,9 +478,6 @@ def get_latest_exam_result_for_exam(user_id: Union[str, int], exam_id: Union[str
         return {"error": "Chưa có lần làm bài nào."}
     return {"success": True, "data": rows[0]}
 
-# =====================
-# TOOL: Xác nhận và cập nhật level từ attempt mới nhất
-# =====================
 class ConfirmLevelInput(BaseModel):
     user_id: Union[str, int]
     exam_id: Union[str, int]
@@ -569,7 +489,6 @@ def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int])
     if user_id_int is None:
         return {"error": "user_id không hợp lệ"}
 
-    # Lấy attempt mới nhất trực tiếp từ DB, hỗ trợ cả exam_id (số) hoặc title (chuỗi)
     exam_id_num = None
     exam_title = None
     try:
@@ -595,9 +514,6 @@ def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int])
     if not rows:
         return {"error": "Chưa có lần làm bài nào cho exam này."}
     attempt = rows[0]
-
-    # Suy ra level từ exam_id, chấm tier theo score
-    # Ưu tiên lấy level từ exam_title nếu có, fallback sang exam_id
     level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_title") or attempt.get("exam_id"))
     if not level_main:
         return {"error": "Không xác định được level từ exam_id."}
@@ -607,8 +523,6 @@ def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int])
     except Exception:
         score_percent = None
     computed_level = _compute_level_from_score(level_main, score_percent)
-
-    # Cập nhật users.level
     try:
         conn = get_db_connection()
         if not conn:

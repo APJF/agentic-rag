@@ -11,7 +11,10 @@ from ...core.session_manager import (
     create_new_session,
     get_user,
     delete_session,
-    rename_session, find_session, add_new_messages
+    rename_session,
+    find_session,
+    add_new_messages,
+    get_session_info,
 )
 from langchain_core.messages import HumanMessage, AIMessage
 from ...features.qna.agent import initialize_qna_agent
@@ -167,18 +170,21 @@ async def get_session_detail(session_id: int = Path(...)):
 # UPDATE: PUT /api/sessions/{id} (toàn phần) và PATCH /api/sessions/{id} (một phần)
 from pydantic import BaseModel
 class SessionUpdateRequest(BaseModel):
-    session_name: Optional[str] = None
+    name: Optional[str] = None
     context: Optional[dict] = None
 
 @router.put("/{session_id}", response_model=SessionInfo)
 async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)):
     updated = False
-    if request.session_name:
-        updated = rename_session(session_id, request.session_name)
+    if request.name:
+        updated = rename_session(session_id, request.name)
     # TODO: cập nhật context nếu cần (cần hàm update_context trong session_manager)
     if not updated and not request.context:
         raise HTTPException(status_code=400, detail="Không có trường nào để cập nhật.")
-    return SessionInfo(id=session_id, session_name=request.session_name or "", updated_at=datetime.now(timezone.utc))
+    info = get_session_info(session_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên.")
+    return SessionInfo(id=info["id"], session_name=info["name"], type=info.get("type"), created_at=info["created_at"], updated_at=info["updated_at"])
 
 @router.patch("/{session_id}", response_model=SessionInfo)
 async def patch_session(session_id: int, request: SessionUpdateRequest = Body(...)):

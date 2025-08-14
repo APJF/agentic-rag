@@ -73,7 +73,6 @@ def knowledge_retriever_tool(query: str, course_id: str = None, level: str = Non
     if not results:
         return "Không tìm thấy thông tin liên quan trong cơ sở tri thức."
 
-    # Định dạng kết quả để AI dễ đọc
     formatted_context = "Dưới đây là các thông tin liên quan được tìm thấy:\n\n"
     for i, doc in enumerate(results):
         formatted_context += f"--- Trích đoạn {i + 1} (Từ Môn học ID: {doc.get('course_id')}) ---\n"
