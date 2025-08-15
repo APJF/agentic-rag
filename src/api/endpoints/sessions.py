@@ -130,8 +130,18 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
 # LIST: GET /api/sessions?user_id=...
 @router.get("/", response_model=SessionListResponse)
 async def list_sessions(user_id: str = Query(..., description="ID người dùng")):
-    sessions = list_sessions_for_user(int(user_id))
-    return SessionListResponse(user_id=user_id, sessions=sessions)
+    sessions_raw = list_sessions_for_user(int(user_id))
+    # Chuẩn hóa khóa 'name' -> 'session_name' để khớp schema
+    sessions_norm = []
+    for s in sessions_raw:
+        sessions_norm.append({
+            "id": s.get("id"),
+            "session_name": s.get("session_name") or s.get("name") or "",
+            "type": s.get("type"),
+            "created_at": s.get("created_at"),
+            "updated_at": s.get("updated_at"),
+        })
+    return SessionListResponse(user_id=user_id, sessions=sessions_norm)
 
 # DETAIL: GET /api/sessions/{id}
 @router.get("/{session_id}", response_model=HistoryResponse)

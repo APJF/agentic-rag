@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Body, HTTPException, Path, status, Response
 import re
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from langchain_core.messages import HumanMessage
 
 from ...core.session_manager import load_session_data, update_session_context
 from ...core.database import get_db_connection
 from ...features.qna.agent import initialize_qna_agent
+from ...features.qna.tools import set_qna_session_id
 from ...features.planner.agent import initialize_planning_agent
 from ...features.learning.agent import initialize_learning_agent
 from ...features.reviewer.agent import initialize_reviewer_agent
@@ -106,9 +107,81 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     }
     if session_type == "planner":
         set_session_user_id(session_data["user_id"])  # đảm bảo tool dùng đúng user_id
+    if session_type == "qna":
+        try:
+            set_qna_session_id(int(request.session_id))
+        except Exception:
+            pass
 
     result = agent.invoke(input_data)
     ai_response_text = result.get("output", "Lỗi: Agent không có output.")
+    # Sanitize: chỉ trả Final Answer cho frontend, ẩn Thought/Action nếu lỡ in ra
+    try:
+        # Nếu có "Final Answer:" thì chỉ lấy phần sau đó
+        m = re.search(r"Final Answer:\s*(.*)", ai_response_text, re.DOTALL | re.IGNORECASE)
+        if m:
+            ai_response_text = m.group(1).strip()
+        else:
+            # Loại bỏ các dòng bắt đầu bằng "Thought:" hoặc "Action:"
+            lines = []
+            for line in ai_response_text.splitlines():
+                if re.match(r"\s*(Thought|Action)\s*:\s*", line, flags=re.IGNORECASE):
+                    continue
+                lines.append(line)
+            ai_response_text = "\n".join(lines).strip()
+    except Exception:
+        pass
+
+    # Nếu agent vừa tạo một bộ câu hỏi, tự động lưu vào session.context để lần sau chấm đáp án được
+    def _extract_quiz_from_text(text: str) -> List[Dict[str, Any]]:
+        try:
+            lines = [ln.rstrip() for ln in text.splitlines()]
+            questions: List[Dict[str, Any]] = []
+            current: Dict[str, Any] = {}
+            for ln in lines:
+                # Match question like: "1. ..." (tiếp theo có thể là văn bản)
+                m_q = re.match(r"^\s*(\d+)\s*\.(.*)$", ln)
+                if m_q:
+                    # push previous
+                    if current:
+                        questions.append(current)
+                        current = {}
+                    idx = int(m_q.group(1))
+                    qtext = m_q.group(2).strip()
+                    current = {
+                        "question_id": f"q{idx}",
+                        "topic": qtext,
+                        "scope": None,
+                        "choices": []
+                    }
+                    # Heuristic: detect scope by header keywords
+                    if re.search(r"kanji", text, re.IGNORECASE):
+                        current["scope"] = "KANJI"
+                    elif re.search(r"vocab|từ vựng", text, re.IGNORECASE):
+                        current["scope"] = "VOCAB"
+                    elif re.search(r"ngữ pháp|grammar", text, re.IGNORECASE):
+                        current["scope"] = "GRAMMAR"
+                    continue
+                # Match choice like: "A. ..."
+                m_c = re.match(r"^\s*([A-Da-d])\s*\.(.*)$", ln)
+                if m_c and current:
+                    opt = m_c.group(1).upper()
+                    ctext = m_c.group(2).strip()
+                    current.setdefault("choices", []).append(f"{opt}. {ctext}")
+            if current:
+                questions.append(current)
+            # lọc bỏ entries thiếu topic/choices
+            questions = [q for q in questions if q.get("topic")]
+            return questions
+        except Exception:
+            return []
+
+    detected_questions = _extract_quiz_from_text(ai_response_text)
+    if detected_questions:
+        try:
+            update_session_context(request.session_id, {"qna_quiz": {"questions": detected_questions, "current_index": 1}})
+        except Exception:
+            pass
 
     # Clear flag để tránh xử lý lặp lại ở lượt sau
     if flag_value is not None:

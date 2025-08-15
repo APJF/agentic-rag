@@ -4,7 +4,23 @@ from langchain.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 
-from .tools import knowledge_retriever_tool, get_course_context_tool
+from .tools import (
+    knowledge_retriever_tool,
+    get_course_context_tool,
+    save_current_question_tool,
+    record_user_answer_tool,
+    clear_current_question_tool,
+    list_available_level_tests_tool,
+    generate_level_test_link_tool,
+    get_user_level_tool,
+    update_user_level_tool,
+    get_session_context_tool,
+    set_qna_session_id,
+    save_quiz_batch_tool,
+    grade_answers_tool,
+    get_saved_question_by_index_tool,
+    get_last_grading_tool,
+)
 from ...core.llm import get_llm
 
 def initialize_qna_agent():
@@ -15,22 +31,33 @@ def initialize_qna_agent():
     llm_instance = get_llm()
     if not llm_instance: return None
 
-    tools = [knowledge_retriever_tool, get_course_context_tool]
+    tools = [
+        knowledge_retriever_tool,
+        get_course_context_tool,
+        save_current_question_tool,
+        record_user_answer_tool,
+        clear_current_question_tool,
+        list_available_level_tests_tool,
+        generate_level_test_link_tool,
+        get_user_level_tool,
+        update_user_level_tool,
+        get_session_context_tool,
+        save_quiz_batch_tool,
+        grade_answers_tool,
+        get_saved_question_by_index_tool,
+        get_last_grading_tool,
+    ]
 
     system_prompt = """
-    Bạn là một Gia sư AI tiếng Nhật toàn năng, thông thái và chính xác. Nhiệm vụ của bạn là trả lời mọi yêu cầu của người học bằng cách suy luận theo quy trình bắt buộc bên dưới.
+    Bạn là một Gia sư AI tiếng Nhật toàn năng, thông thái và chính xác. Nhiệm vụ của bạn là trả lời mọi yêu cầu của người học. Bạn phải suy luận nội bộ (không hiển thị) và chỉ trả về câu trả lời cuối cùng sạch cho người dùng.
 
     ============================
     QUY TRÌNH SUY LUẬN VÀ HÀNH ĐỘNG
     ============================
 
     **BƯỚC 1: PHÂN TÍCH YÊU CẦU**
-    - `Thought`: Đầu tiên, tôi phải tập trung vào yêu cầu mới nhất của người dùng. Yêu cầu đó là: **"{input}"**. Dựa vào yêu cầu này, tôi sẽ phân loại nhiệm vụ: dịch thuật / tạo quiz / hỏi-đáp / sửa lỗi. 
-    - `Action`: 
-        - Nếu là dịch thuật → Gán `task_type = translation`
-        - Nếu là tạo quiz → Gán `task_type = quiz`
-        - Nếu là hỏi-đáp → Gán `task_type = qna`
-        - Nếu là sửa lỗi → Gán `task_type = correction`
+    - (internal) Phân tích yêu cầu: **"{input}"** → phân loại: dịch thuật / tạo quiz / hỏi-đáp / sửa lỗi.
+    - (internal) Đặt `task_type` phù hợp.
     - Nếu có đề cập mã môn (ví dụ: JPD113) → Lưu vào `course_id`
 
     **BƯỚC 2: LẤY NGỮ CẢNH (TÙY THEO TASK)**
@@ -46,8 +73,8 @@ def initialize_qna_agent():
             - Nếu chỉ có `hobby` hoặc không có gì → Tạo quiz ngẫu nhiên phù hợp
 
     **BƯỚC 3: XỬ LÝ NỘI DUNG YÊU CẦU**
-    - `Thought`: Tôi đã có đủ thông tin từ RAG (nếu cần). Giờ tôi sẽ xử lý yêu cầu theo `task_type`.
-    - `Final Answer`:
+    - (internal) Xử lý theo `task_type`. Cuối cùng:
+    - Trả lời duy nhất một khối dưới đây.
         - Nếu `task_type == translation`: 
             - Phân loại đầu vào là từ / câu / đoạn → Áp dụng đúng định dạng dưới đây.
         - Nếu `task_type == correction`: 
@@ -121,7 +148,7 @@ def initialize_qna_agent():
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         MessagesPlaceholder(variable_name="chat_history"),
-        ("user", "Yêu cầu của tôi là: {input}"),
+        ("user", "Yêu cầu của tôi là: {input}\n\nLưu ý: Không hiển thị bước suy nghĩ.\n- Nếu bạn tạo quiz nhiều câu, hãy gọi save_quiz_batch_tool(questions=[{{question_id, scope, choices, correct_answer}}, ...]).\n- Nếu người dùng trả lời theo format '1.B, 2.C, ...' hãy gọi grade_answers_tool(raw=...).\n- Nếu người dùng hỏi 'câu X' sau khi đã có bộ câu hỏi, hãy gọi get_saved_question_by_index_tool(index=X) để lấy đúng nội dung và giải thích.\n- Nếu bạn tạo từng câu riêng lẻ, hãy gọi save_current_question_tool(...) ngay sau mỗi câu. Nếu người dùng trả lời cho câu gần nhất, gọi record_user_answer_tool(answer=...).\nChỉ trả lời nội dung cuối cùng cho người dùng."),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
