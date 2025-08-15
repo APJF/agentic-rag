@@ -57,14 +57,56 @@ def ingest_roadmap_templates(
     try:
         with conn.cursor() as cur, open(jsonl_path, "r", encoding="utf-8") as f:
             page_counter = 0
-            for line in f:
-                line = line.strip()
-                if not line:
+            buffer = ""
+            brace_depth = 0
+            for raw_line in f:
+                s = (raw_line or "").strip()
+                if not s:
                     continue
-                try:
-                    doc = json.loads(line)
-                except json.JSONDecodeError:
-                    print("[Roadmap Ingest] Bỏ qua dòng JSON không hợp lệ.")
+
+                # Thu gom JSON object nhiều dòng (dựa trên số lượng ngoặc nhọn)
+                if not buffer:
+                    # Nếu dòng là một JSON object hoàn chỉnh
+                    if s.startswith("{") and s.endswith("}"):
+                        try:
+                            doc = json.loads(s)
+                        except json.JSONDecodeError:
+                            print("[Roadmap Ingest] Bỏ qua dòng JSON không hợp lệ.")
+                            continue
+                    else:
+                        # Nếu bắt đầu object nhưng chưa kết thúc
+                        if s.startswith("{"):
+                            buffer = s
+                            brace_depth = s.count("{") - s.count("}")
+                            continue
+                        # Bất kỳ dòng không phải JSON object, bỏ qua an toàn
+                        try:
+                            tmp = json.loads(s)
+                            if not isinstance(tmp, dict):
+                                # JSON hợp lệ nhưng không phải object (vd: chuỗi) → bỏ qua
+                                print("[Roadmap Ingest] Bỏ qua JSON không phải object.")
+                                continue
+                            doc = tmp
+                        except json.JSONDecodeError:
+                            print("[Roadmap Ingest] Bỏ qua dòng JSON không hợp lệ.")
+                            continue
+                else:
+                    buffer += " " + s
+                    brace_depth += s.count("{") - s.count("}")
+                    if brace_depth > 0:
+                        continue
+                    try:
+                        doc = json.loads(buffer)
+                    except json.JSONDecodeError:
+                        print("[Roadmap Ingest] Bỏ qua block JSON không hợp lệ.")
+                        buffer = ""
+                        brace_depth = 0
+                        continue
+                    buffer = ""
+                    brace_depth = 0
+
+                if not isinstance(doc, dict):
+                    print("[Roadmap Ingest] Bỏ qua JSON không phải object.")
                     continue
 
                 chunk_text = _build_chunk_text(doc)

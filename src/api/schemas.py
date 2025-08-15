@@ -54,6 +54,7 @@ class Message(BaseModel):
     order: int
     type: Literal['human', 'ai']
     content: str
+    created_at: datetime
 
 class HistoryResponse(BaseModel):
     session_id: int

@@ -127,6 +127,8 @@ PGADMIN_PASSWORD=admin
 * Cấu hình embedding model, vector store và agent logic đều có thể mở rộng.
 * Các agent có thể tương tác trực tiếp thông qua API hoặc tích hợp vào frontend như React/Vue.
 * Bạn có thể tạo file `.env.example` và thêm vào `.gitignore` để hỗ trợ cộng tác viên.
+* Chạy server bằng ở trong terminal: .venv\Scripts\python.exe -m uvicorn src.api.main:app --reload 
+* Hoặc chỉ cần: uvicorn src.api.main:app --reload
 
 ---
 

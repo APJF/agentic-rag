@@ -17,6 +17,7 @@ llm_instance = get_llm()
 
 router = APIRouter()
 
+AGENT_NO_OUTPUT_ERROR = "Lỗi: Agent không có output."
 
 async def generate_session_name(first_message: str) -> str:
     """Dùng AI để tóm tắt tin nhắn đầu tiên thành một tiêu đề ngắn."""
@@ -51,12 +52,10 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     if not session_id:
         raise HTTPException(status_code=500, detail="Không thể tạo phiên mới.")
 
-    # 3. Lưu tin nhắn đầu tiên của người dùng
     human_msg = HumanMessage(content=request.first_message)
     add_new_messages(session_id, [human_msg])
 
-    # 4. Điều phối và xử lý tin nhắn đầu tiên
-    chat_history = [human_msg]  # Lịch sử ban đầu chỉ có 1 tin nhắn
+    chat_history = [human_msg]
     input_data = {
         "user_id": request.user_id,
         "input": request.first_message,
@@ -64,15 +63,12 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     }
 
     if session_type == "PLANNER":
-        # Đảm bảo tool Planner luôn dùng đúng user_id
         set_session_user_id(input_data["user_id"])
         result = planner_agent_executor.invoke(input_data)
-    else:  # Mặc định xử lý bằng QnA Agent
+    else:
         result = qna_agent_executor.invoke(input_data)
 
-    ai_response_text = result.get('output', "Lỗi: Agent không có output.")
-
-    # 5. Lưu tin nhắn trả lời của AI
+    ai_response_text = result.get('output', AGENT_NO_OUTPUT_ERROR)
     ai_msg = AIMessage(content=ai_response_text)
     add_new_messages(session_id, [ai_msg])
 
@@ -95,22 +91,20 @@ async def invoke_assistant(request: ChatRequest):
         "input": request.user_input,
         "chat_history": session_data["history"]
     }
-    
-    # Điều phối đến agent phù hợp
+
     if session_type == "PLANNER":
-        # Đảm bảo tool Planner luôn dùng đúng user_id
         set_session_user_id(input_data["user_id"])
         result = planner_agent_executor.invoke(input_data)
-    else: # Mặc định là QnA
+    else:
         result = qna_agent_executor.invoke(input_data)
         
-    ai_response_text = result.get('output', "Lỗi: Agent không có output.")
+    ai_response_text = result.get('output', AGENT_NO_OUTPUT_ERROR)
 
     human_msg = HumanMessage(content=request.user_input)
     ai_msg = AIMessage(content=ai_response_text)
     add_new_messages(request.session_id, [human_msg, ai_msg])
 
-    return ChatResponse(session_id=str(request.session_id), ai_response=ai_response_text)
+    return ChatResponse(session_id=request.session_id, ai_response=ai_response_text)
 
 
 @router.post("/edit_and_resubmit", response_model=ChatResponse)
@@ -130,10 +124,10 @@ async def edit_and_resubmit_message(request: ChatEditRequest = Body(...)):
         "chat_history": session_data["history"]
     }
     result = qna_agent_executor.invoke(input_data)
-    ai_response_text = result.get('output', "Lỗi: Agent không có output.")
+    ai_response_text = result.get('output', AGENT_NO_OUTPUT_ERROR)
 
     human_msg = HumanMessage(content=request.corrected_input)
     ai_msg = AIMessage(content=ai_response_text)
     add_new_messages(request.session_id, [human_msg, ai_msg])
 
-    return ChatResponse(session_id=str(request.session_id), ai_response=ai_response_text)
+    return ChatResponse(session_id=request.session_id, ai_response=ai_response_text)

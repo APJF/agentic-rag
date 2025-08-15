@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Path, Body, status, Response, Request, Query
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from ..schemas import SessionListResponse, HistoryResponse, Message, SessionCreateRequest, SessionInfo, SessionRenameRequest, ChatInitiateRequest, ChatInitiateResponse
 from ...core.session_manager import (
@@ -131,15 +131,24 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
 @router.get("/", response_model=SessionListResponse)
 async def list_sessions(user_id: str = Query(..., description="ID người dùng")):
     sessions_raw = list_sessions_for_user(int(user_id))
-    # Chuẩn hóa khóa 'name' -> 'session_name' để khớp schema
+    # Chuẩn hóa khóa 'name' -> 'session_name' để khớp schema và convert UTC->UTC+7
     sessions_norm = []
     for s in sessions_raw:
+        created_at = s.get("created_at")
+        updated_at = s.get("updated_at")
+        try:
+            if created_at:
+                created_at = created_at + timedelta(hours=7)
+            if updated_at:
+                updated_at = updated_at + timedelta(hours=7)
+        except Exception:
+            pass
         sessions_norm.append({
             "id": s.get("id"),
             "session_name": s.get("session_name") or s.get("name") or "",
             "type": s.get("type"),
-            "created_at": s.get("created_at"),
-            "updated_at": s.get("updated_at"),
+            "created_at": created_at,
+            "updated_at": updated_at,
         })
     return SessionListResponse(user_id=user_id, sessions=sessions_norm)
 
@@ -154,7 +163,7 @@ async def get_session_detail(session_id: int = Path(...)):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, type, content, "order"
+                SELECT id, type, content, "order", timestamp
                 FROM message
                 WHERE session_id = %s
                 ORDER BY "order" ASC;
@@ -165,12 +174,14 @@ async def get_session_detail(session_id: int = Path(...)):
             if rows is None:
                 raise HTTPException(status_code=404, detail="Không tìm thấy session.")
             messages = []
-            for rid, mtype, content, order in rows:
+            for rid, mtype, content, order, ts in rows:
+                ts_utc7 = (ts + timedelta(hours=7)) if ts else None
                 messages.append({
                     "id": rid,
                     "order": order,
                     "type": 'human' if mtype == 'human' else 'ai',
-                    "content": content
+                    "content": content,
+                    "created_at": ts_utc7,
                 })
     finally:
         if conn:
@@ -194,7 +205,10 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
     info = get_session_info(session_id)
     if not info:
         raise HTTPException(status_code=404, detail="Không tìm thấy phiên.")
-    return SessionInfo(id=info["id"], session_name=info["name"], type=info.get("type"), created_at=info["created_at"], updated_at=info["updated_at"])
+    # convert UTC -> UTC+7
+    created_utc7 = (info["created_at"] + timedelta(hours=7)) if info.get("created_at") else None
+    updated_utc7 = (info["updated_at"] + timedelta(hours=7)) if info.get("updated_at") else None
+    return SessionInfo(id=info["id"], session_name=info["name"], type=info.get("type"), created_at=created_utc7, updated_at=updated_utc7)
 
 @router.patch("/{session_id}", response_model=SessionInfo)
 async def patch_session(session_id: int, request: SessionUpdateRequest = Body(...)):
