@@ -13,6 +13,7 @@ from .tools import (
     create_learning_path,
     update_user_level,
     get_user_level,
+    find_relevant_courses,
     get_course_sequence_between_levels,
     get_course_sequence_for_improvement,
     calculate_path_duration,
@@ -43,6 +44,7 @@ def initialize_planning_agent():
         create_learning_path,
         update_user_level,
         get_user_level,
+        find_relevant_courses,
         get_course_sequence_between_levels,
         get_course_sequence_for_improvement,
         calculate_path_duration,
@@ -89,15 +91,15 @@ QUAN TRỌNG:
                 • Gửi link: `localhost:5173/exam/{{examId}}/preparation` (thay `{{examId}}` bằng giá trị ở trên).
                 • Thông báo họ hoàn thành test xong hãy quay lại để tiếp tục lộ trình.
                 • Dừng lại (không tạo lộ trình nữa).
-            - Nếu trả lời "không" hoặc muốn bỏ qua: tiếp tục các bước bên dưới để xây dựng lộ trình trực tiếp.
+            - Nếu trả lời "không" hoặc muốn bỏ qua: NGAY LẬP TỨC sang bước chọn môn và tạo lộ trình TRONG CÙNG LƯỢT, không yêu cầu người dùng chờ.
     **2.b SAU KHI NGƯỜI DÙNG LÀM XONG BÀI TEST:**
         - Nếu `context.exam_completed == "yes"` và có `context.suggested_exam_id`:
             1) Gọi tool `confirm_and_update_level(user_id, exam_id=context.suggested_exam_id)` để tự động lấy attempt mới nhất cho exam đó (theo user_id + exam_id), suy ra tier (H/M/L) theo điểm và cập nhật `users.level`.
             2) Thông báo ngắn gọn kết quả (level mới, điểm) rồi chuyển sang tạo lộ trình theo level đã cập nhật, KHÔNG yêu cầu người dùng cung cấp exam_result_id.
 
-    **2. TÌM KIẾM VÀ CHẤM ĐIỂM KHÓA HỌC:**
-        - Dùng tool `find_relevant_courses`. Nếu không tìm thấy, hãy dừng lại và thông báo cho người dùng.
-        - `Thought`: "Bây giờ tôi có danh sách các khóa học ứng viên. Tôi sẽ tự 'chấm điểm' từng khóa học dựa trên sự phù hợp của `description` và `requirement` với `focus_skill` và `learning_goal` của người dùng để sắp xếp chúng theo thứ tự ưu tiên."
+    **2. LẤY DANH SÁCH MÔN HỌC:**
+        - ƯU TIÊN dùng `get_course_sequence_between_levels(start_level, end_level)` theo `current_level`→`target_level`, hoặc `get_course_sequence_for_improvement(current_level)` khi mục tiêu là cải thiện kỹ năng.
+        - Nếu cần mở rộng/điều chỉnh theo focus, có thể dùng thêm `find_relevant_courses`.
     **3. QUYẾT ĐỊNH SỐ LƯỢỢNG KHÓA HỌC (DỰA TRÊN THỜI GIAN):**
         - Nếu người dùng nói "thi JLPT" mà không ghi tháng, tự suy ra kỳ gần nhất (7 hoặc 12) theo `get_now_utc7()`; nếu hiện tại đã qua kỳ gần nhất, lấy kỳ tiếp theo.
         - Dùng tool `calculate_time_constraints` nếu có `deadline_info`.
@@ -110,7 +112,7 @@ QUAN TRỌNG:
                    • Xem như KHÔNG có deadline (dùng full danh sách) HOẶC đề xuất kỳ thi sắp tới (tháng 7/12 gần nhất).
                - Nếu `estimated_weeks` > số tuần còn lại + 1, cắt bớt môn cuối cùng và tính lại cho đến khi phù hợp.
                - Nếu sau khi cắt tối đa vẫn > deadline → `Final Answer`: Nhận xét “khó đạt mục tiêu trong thời gian X; cần tăng giờ học hoặc nới deadline”.
-            6. Sau khi xác định danh sách cuối, gọi `create_learning_path`.
+            6. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu.
     **5. TRÌNH BÀY:**
         - `Final Answer`: Trình bày chi tiết lộ trình vừa tạo và thông báo rằng nó đã được lưu và kích hoạt.
 

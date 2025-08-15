@@ -61,6 +61,9 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if not session_data:
         raise HTTPException(status_code=404, detail=f"Phiên {request.session_id} không tồn tại.")
 
+    # Xác định loại phiên sớm để dùng trong các nhánh xử lý phía dưới
+    session_type = (session_data.get("type") or "qna").lower()
+
     human_id = _insert_message(request.session_id, "human", request.user_input)
     if human_id is None:
         raise HTTPException(status_code=500, detail="Không thể lưu tin nhắn người dùng.")
@@ -84,7 +87,21 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         exam_completed_flag = True
         update_session_context(request.session_id, {"exam_completed": "yes"})
 
-    session_type = (session_data.get("type") or "qna").lower()
+    # Nếu user phủ định (không) ngay sau khi AI vừa hỏi về test → coi như skip test
+    if session_type == "planner" and flag_value == "no":
+        try:
+            # last AI message trước khi user trả lời hiện tại
+            last_msgs = session_data.get("history", [])
+            last_ai_text = None
+            for m in reversed(last_msgs):
+                if getattr(m, 'type', None) == 'ai' or m.__class__.__name__ == 'AIMessage':
+                    last_ai_text = getattr(m, 'content', '')
+                    break
+            if last_ai_text and any(k in last_ai_text.lower() for k in ["bài test", "kiem tra", "kiểm tra", "test"]):
+                update_session_context(request.session_id, {"skip_level_test": True})
+        except Exception:
+            pass
+
     agent_map = {
         "qna": initialize_qna_agent(),
         "planner": initialize_planning_agent(),
@@ -110,6 +127,61 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if session_type == "qna":
         try:
             set_qna_session_id(int(request.session_id))
+        except Exception:
+            pass
+
+    # Heuristic: cập nhật context tự động cho planner dựa trên user_input
+    if session_type == "planner":
+        def _derive_planner_context(text: str) -> Dict[str, Any]:
+            t = (text or "").lower()
+            ctx: Dict[str, Any] = {}
+            # current level inference
+            if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
+                ctx["current_level"] = "N5-L"
+            # learning goal / target level
+            import re as _re
+            m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
+            if m_target and ("học" in t or "thi" in t or "jlpt" in t):
+                target = m_target.group(1).upper()
+                ctx["learning_goal"] = f"JLPT {target}"
+                ctx["target_level"] = target
+            # deadline "trong năm nay"
+            if "trong năm nay" in t:
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc) + timedelta(hours=7)
+                deadline = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+                ctx["deadline_info"] = deadline.isoformat()
+            # skills
+            skills = []
+            if any(k in t for k in ["nghe"]): skills.append("LISTENING")
+            if any(k in t for k in ["nói", "noi"]): skills.append("SPEAKING")
+            if any(k in t for k in ["đọc", "doc"]): skills.append("READING")
+            if any(k in t for k in ["viết", "viet"]): skills.append("WRITING")
+            if any(k in t for k in ["kanji"]): skills.append("KANJI")
+            if any(k in t for k in ["tất cả", "tat ca", "tổng hợp", "tong hop"]): skills.append("ALL")
+            if skills:
+                ctx["focus_skills"] = skills
+            # skip test
+            if any(k in t for k in ["không cần test", "khong can test", "không cần kiểm tra", "khong can kiem tra"]):
+                ctx["skip_level_test"] = True
+            return ctx
+
+        try:
+            # Merge với context hiện tại để tránh ghi đè mất dữ liệu
+            derived = _derive_planner_context(request.user_input)
+            if derived:
+                update_session_context(request.session_id, derived)
+                # Nếu user phát lộ thông tin chắc chắn về level/target, đồng bộ vào bảng users
+                if derived.get("current_level"):
+                    try:
+                        from ...core.database import get_db_connection
+                        conn = get_db_connection()
+                        if conn:
+                            with conn.cursor() as cur:
+                                cur.execute('UPDATE "users" SET level = %s WHERE id = %s;', (derived["current_level"], session_data["user_id"]))
+                                conn.commit()
+                    except Exception:
+                        pass
         except Exception:
             pass
 

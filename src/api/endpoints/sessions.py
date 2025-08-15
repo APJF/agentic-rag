@@ -1,7 +1,7 @@
 # src/api/endpoints/sessions.py
 
 from fastapi import APIRouter, HTTPException, Path, Body, status, Response, Request, Query
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 
 from ..schemas import SessionListResponse, HistoryResponse, Message, SessionCreateRequest, SessionInfo, SessionRenameRequest, ChatInitiateRequest, ChatInitiateResponse
@@ -85,11 +85,57 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
 
     session_name = await generate_session_name(request.first_message, intent)
 
+    # Seed context for planner: derive info from first_message and user profile
+    merged_context: Dict[str, Any] = dict(request.context or {})
+    if intent == "planner":
+        def _derive_planner_context_from_text(text: str) -> Dict[str, Any]:
+            t = (text or "").lower()
+            ctx: Dict[str, Any] = {}
+            # current level inference
+            if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
+                ctx["current_level"] = "N5-L"
+            # learning goal / target level
+            import re as _re
+            m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
+            if m_target and ("học" in t or "thi" in t or "jlpt" in t):
+                target = m_target.group(1).upper()
+                ctx["learning_goal"] = f"JLPT {target}"
+                ctx["target_level"] = target
+            # deadline "trong năm nay"
+            if "trong năm nay" in t:
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc) + timedelta(hours=7)
+                deadline = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
+                ctx["deadline_info"] = deadline.isoformat()
+            return ctx
+
+        # merge user profile (level/hobby/target) if exists
+        try:
+            from ...core.database import get_db_connection
+            conn = get_db_connection()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute('SELECT level, hobby, target FROM "users" WHERE id = %s;', (int(request.user_id),))
+                    row = cur.fetchone()
+                    if row:
+                        level, hobby, target = row
+                        if level and not merged_context.get("current_level"):
+                            merged_context["current_level"] = level
+                        if hobby and not merged_context.get("hobby"):
+                            merged_context["hobby"] = hobby
+                        if target and not merged_context.get("learning_goal"):
+                            merged_context["learning_goal"] = target
+        except Exception:
+            pass
+
+        derived = _derive_planner_context_from_text(request.first_message)
+        merged_context.update({k: v for k, v in derived.items() if v is not None})
+
     session_id = create_new_session(
         user_id=int(request.user_id),
         session_name=session_name,
         session_type=intent,
-        context=request.context
+        context=merged_context
     )
     if not session_id:
         raise HTTPException(status_code=500, detail="Không thể tạo phiên mới.")
@@ -161,28 +207,62 @@ async def get_session_detail(session_id: int = Path(...)):
         raise HTTPException(status_code=500, detail="Không thể kết nối DB.")
     try:
         with conn.cursor() as cur:
+            # Detect time column in message table
             cur.execute(
                 """
-                SELECT id, type, content, "order", timestamp
-                FROM message
-                WHERE session_id = %s
-                ORDER BY "order" ASC;
-                """,
-                (session_id,)
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name='message' AND table_schema='public';
+                """
             )
+            cols = {r[0] for r in cur.fetchall()}
+            time_col = 'timestamp' if 'timestamp' in cols else ('created_at' if 'created_at' in cols else None)
+
+            if time_col:
+                cur.execute(
+                    f"""
+                    SELECT id, type, content, "order", {time_col}
+                    FROM message
+                    WHERE session_id = %s
+                    ORDER BY "order" ASC;
+                    """,
+                    (session_id,)
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, type, content, "order"
+                    FROM message
+                    WHERE session_id = %s
+                    ORDER BY "order" ASC;
+                    """,
+                    (session_id,)
+                )
             rows = cur.fetchall()
             if rows is None:
                 raise HTTPException(status_code=404, detail="Không tìm thấy session.")
             messages = []
-            for rid, mtype, content, order, ts in rows:
-                ts_utc7 = (ts + timedelta(hours=7)) if ts else None
-                messages.append({
-                    "id": rid,
-                    "order": order,
-                    "type": 'human' if mtype == 'human' else 'ai',
-                    "content": content,
-                    "created_at": ts_utc7,
-                })
+            if 'ts' not in locals():
+                # populate messages based on whether time_col exists
+                if time_col:
+                    for rid, mtype, content, order, tsv in rows:
+                        ts_utc7 = (tsv + timedelta(hours=7)) if tsv else None
+                        messages.append({
+                            "id": rid,
+                            "order": order,
+                            "type": 'human' if mtype == 'human' else 'ai',
+                            "content": content,
+                            "created_at": ts_utc7,
+                        })
+                else:
+                    now_utc7 = datetime.now(timezone.utc) + timedelta(hours=7)
+                    for rid, mtype, content, order in rows:
+                        messages.append({
+                            "id": rid,
+                            "order": order,
+                            "type": 'human' if mtype == 'human' else 'ai',
+                            "content": content,
+                            "created_at": now_utc7,
+                        })
     finally:
         if conn:
             conn.close()

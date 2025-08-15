@@ -149,7 +149,13 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 return {"error": "user_id không hợp lệ."}
             if not course_ids:
                 return {"error": "Danh sách khóa học trống. Hãy gọi tool lấy sequence khóa học trước khi tạo lộ trình."}
-            total_hours = _sum_course_duration(cur, course_ids)
+            # Chỉ giữ các course tồn tại trong DB
+            cur.execute('SELECT id FROM course WHERE id = ANY(%s);', (course_ids,))
+            existing_ids = [r[0] for r in cur.fetchall()]
+            skipped_ids = [cid for cid in course_ids if cid not in set(existing_ids)]
+            if not existing_ids:
+                return {"error": "Không có mã môn hợp lệ trong cơ sở dữ liệu.", "skipped_courses": skipped_ids}
+            total_hours = _sum_course_duration(cur, existing_ids)
             cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
             cur.execute(
                 '''INSERT INTO learning_path (user_id, title, description, target_level, primary_goal, focus_skill, status, created_at, last_updated_at, duration)
@@ -157,11 +163,11 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 (user_id_int, title, description, target_level, primary_goal, focus_skill, 'STUDYING', total_hours)
             )
             path_id = cur.fetchone()[0]
-            if course_ids:
-                values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(course_ids)]
+            if existing_ids:
+                values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(existing_ids)]
                 execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
             conn.commit()
-            return {"success": True, "path_id": path_id}
+            return {"success": True, "path_id": path_id, "used_course_ids": existing_ids, "skipped_courses": skipped_ids}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
@@ -449,7 +455,10 @@ def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> 
         return {"error": "Không kết nối DB"}
     try:
         with conn.cursor() as cur:
-            total = _sum_course_duration(cur, course_ids)
+            # Chỉ tính thời lượng dựa trên các môn có thật trong DB
+            cur.execute('SELECT id FROM course WHERE id = ANY(%s);', (course_ids,))
+            existing_ids = [r[0] for r in cur.fetchall()]
+            total = _sum_course_duration(cur, existing_ids)
         weeks = ceil(total / hours_per_week) if hours_per_week else None
         return {"success": True, "total_hours": total, "estimated_weeks": weeks}
     except Exception as e:
