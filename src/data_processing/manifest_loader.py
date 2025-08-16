@@ -14,10 +14,11 @@ def _load_manifest() -> List[dict]:
         return json.load(fp)
 
 def _main_level(level: str) -> str:
-    """Trả về level chính (N5..N1) từ chuỗi có thể chứa tier, ví dụ 'N4-M' -> 'N4'."""
+    """Trả về level chính (N5..N1) từ chuỗi có thể chứa tier, ví dụ 'N4_M' hoặc 'N4-M' -> 'N4'."""
     lvl = (level or "").upper().strip()
-    if '-' in lvl:
-        lvl = lvl.split('-')[0]
+    if '-' in lvl or '_' in lvl:
+        import re as _re
+        lvl = _re.split(r"[-_]", lvl)[0]
     return lvl
 
 def courses_by_level(level: str) -> List[str]:

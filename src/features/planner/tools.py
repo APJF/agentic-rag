@@ -53,7 +53,7 @@ def _jlpt_level_down(level_main: str) -> str:
 
 def _compute_level_from_score(level_main: str, score_percent: float) -> str:
     if score_percent is None:
-        return f"{level_main}-M"
+        return f"{level_main}_M"
     if score_percent >= 80:
         tier = "H"
     elif score_percent >= 60:
@@ -63,7 +63,7 @@ def _compute_level_from_score(level_main: str, score_percent: float) -> str:
     else:
         level_main = _jlpt_level_down(level_main)
         tier = "H"
-    return f"{level_main}-{tier}"
+    return f"{level_main}_{tier}"
 
 class CreateLearningPathInput(BaseModel):
     user_id: Union[str, int] = Field(...)
@@ -378,7 +378,7 @@ def weeks_until_deadline_utc7(deadline_iso: str) -> dict:
 
 @tool
 def get_user_level(user_id: Union[str, int]) -> dict:
-    """Trả về level hiện tại của user từ bảng users.level (ví dụ 'N4-M')."""
+    """Trả về level hiện tại của user từ bảng users.level (ví dụ 'N4_M')."""
     try:
         user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
         if user_id_int is None:
@@ -407,9 +407,10 @@ def get_course_sequence_between_levels(start_level: str, end_level: str) -> dict
 
 @tool
 def get_course_sequence_for_improvement(current_level: str) -> dict:
-    """Cho level hiện tại (ví dụ 'N5-M'), trả danh sách course_id để đạt +2 level (N3-M)."""
+    """Cho level hiện tại (ví dụ 'N5_M'), trả danh sách course_id để đạt +2 level (N3_M)."""
     try:
-        main_level = current_level.upper().split('-')[0]
+        import re as _re
+        main_level = _re.split(r"[-_]", current_level.upper())[0]
         order = ["N5", "N4", "N3", "N2", "N1"]
         if main_level not in order:
             return {"error": "Level không hợp lệ"}

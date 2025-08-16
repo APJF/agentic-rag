@@ -93,7 +93,7 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
             ctx: Dict[str, Any] = {}
             # current level inference
             if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
-                ctx["current_level"] = "N5-L"
+                ctx["current_level"] = "N5_L"
             # learning goal / target level
             import re as _re
             m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
@@ -120,7 +120,10 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
                     if row:
                         level, hobby, target = row
                         if level and not merged_context.get("current_level"):
-                            merged_context["current_level"] = level
+                            # Chuẩn hóa N5-L -> N5_L khi nạp từ hồ sơ
+                            import re as _re
+                            lvl_norm = _re.sub(r"\b(N[1-5])[-_]([HML])\b", r"\1_\2", str(level).upper())
+                            merged_context["current_level"] = lvl_norm
                         if hobby and not merged_context.get("hobby"):
                             merged_context["hobby"] = hobby
                         if target and not merged_context.get("learning_goal"):

@@ -137,7 +137,7 @@ async def create_message(request: MessageCreateRequest = Body(...)):
             ctx: Dict[str, Any] = {}
             # current level inference
             if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
-                ctx["current_level"] = "N5-L"
+                ctx["current_level"] = "N5_L"
             # learning goal / target level
             import re as _re
             m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
