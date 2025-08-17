@@ -2,7 +2,7 @@ import os
 import json
 import argparse
 import re
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from src.core.embedding import encode_text
 from src.core.vector_store_interface import get_db_connection
