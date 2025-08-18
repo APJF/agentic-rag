@@ -19,3 +19,6 @@ EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", 768))
 RAG_CONTENT_CHUNK_TABLE = os.getenv("RAG_CONTENT_CHUNK_TABLE", "content_chunks")
 RAG_SAMPLE_DATA_DIR = os.getenv("RAG_SAMPLE_DATA_DIR")
 CMS_API_BASE_URL = os.getenv("CMS_API_BASE_URL", "http://localhost:8080/api")
+
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+CORS_ALLOW_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "")

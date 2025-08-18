@@ -87,8 +87,8 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         exam_completed_flag = True
         update_session_context(request.session_id, {"exam_completed": "yes"})
 
-    # Nếu user phủ định (không) ngay sau khi AI vừa hỏi về test → coi như skip test
-    if session_type == "planner" and flag_value == "no":
+    # Planner: phân biệt xác nhận theo câu hỏi AI gần nhất
+    if session_type == "planner" and flag_value in {"yes", "no"}:
         try:
             # last AI message trước khi user trả lời hiện tại
             last_msgs = session_data.get("history", [])
@@ -97,8 +97,52 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                 if getattr(m, 'type', None) == 'ai' or m.__class__.__name__ == 'AIMessage':
                     last_ai_text = getattr(m, 'content', '')
                     break
-            if last_ai_text and any(k in last_ai_text.lower() for k in ["bài test", "kiem tra", "kiểm tra", "test"]):
-                update_session_context(request.session_id, {"skip_level_test": True})
+            if last_ai_text:
+                low = last_ai_text.lower()
+                asked_about_test = any(k in low for k in ["bài test", "kiem tra", "kiểm tra", "test jlpt", "test"])
+                asked_about_deletion = any(k in low for k in ["xóa", "xoá", "xoa", "bỏ môn", "bo mon", "remove", "delete"])  # chỉ khi có từ khóa xóa
+                asked_about_addition = any(k in low for k in ["thêm", "them", "add", "bổ sung", "bo sung"])  # chỉ khi có từ khóa thêm
+                asked_about_reorder = any(k in low for k in ["đổi vị trí", "doi vi tri", "đổi thứ tự", "doi thu tu", "reorder", "sắp xếp lại", "sap xep lai", "swap"])  
+
+                if asked_about_test:
+                    if flag_value == "no":
+                        update_session_context(request.session_id, {"skip_level_test": True})
+                    else:  # yes
+                        update_session_context(request.session_id, {"wants_level_test": True})
+                elif asked_about_deletion:
+                    # Cờ xác nhận xóa môn
+                    payload = {"confirm_delete_courses": flag_value}
+                    # Cố gắng trích xuất danh sách course_id xuất hiện trong thông điệp AI gần nhất
+                    try:
+                        course_ids = list({m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)})
+                        if course_ids:
+                            payload["pending_delete_courses"] = course_ids
+                    except Exception:
+                        pass
+                    update_session_context(request.session_id, payload)
+                elif asked_about_addition:
+                    # Cờ xác nhận thêm môn
+                    payload = {"confirm_add_courses": flag_value}
+                    try:
+                        course_ids = list({m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)})
+                        if course_ids:
+                            payload["pending_add_courses"] = course_ids
+                    except Exception:
+                        pass
+                    update_session_context(request.session_id, payload)
+                elif asked_about_reorder:
+                    # Cờ xác nhận đổi thứ tự môn
+                    payload = {"confirm_reorder_courses": flag_value}
+                    try:
+                        # Bắt danh sách các mã môn xuất hiện trong câu AI; nếu có đúng 2 mã, coi như swap cặp này
+                        course_ids = [m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)]
+                        if course_ids:
+                            payload["pending_reorder_courses"] = course_ids
+                            if len(course_ids) == 2:
+                                payload["pending_reorder_swap"] = course_ids
+                    except Exception:
+                        pass
+                    update_session_context(request.session_id, payload)
         except Exception:
             pass
 
@@ -259,9 +303,29 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if flag_value is not None:
         update_session_context(request.session_id, {"confirm_previous_question": ""})
 
+    # Dọn các cờ planner sau khi đã invoke agent để tránh lặp ở lượt kế
+    if session_type == "planner":
+        try:
+            clear_payload: Dict[str, Any] = {}
+            # confirm flags về chuỗi rỗng, pending list về []
+            for k in [
+                "confirm_add_courses",
+                "confirm_delete_courses",
+                "wants_level_test",
+            ]:
+                clear_payload[k] = ""
+            for k in [
+                "pending_add_courses",
+                "pending_delete_courses",
+            ]:
+                clear_payload[k] = []
+            update_session_context(request.session_id, clear_payload)
+        except Exception:
+            pass
+
     # Bắt examId từ link AI đã gửi để lưu vào context, phục vụ lần sau tự check kết quả
     try:
-        # dạng link: localhost:5173/exam/<examId>/preparation
+        # dạng link: <FRONTEND>/exam/<examId>/preparation
         m = re.search(r"exam/([^/]+)/preparation", ai_response_text)
         if m:
             exam_id_captured = m.group(1)

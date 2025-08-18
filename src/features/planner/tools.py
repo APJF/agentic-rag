@@ -257,7 +257,7 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] != 'ACTIVE':
+            if row[0] not in ('ACTIVE', 'STUDYING'):
                 return {"error": "Chỉ có thể thêm khóa học vào lộ trình đang hoạt động."}
             # Lấy order number lớn nhất hiện có
             cur.execute('SELECT COALESCE(MAX(course_order_number), 0) FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
@@ -291,7 +291,7 @@ def reorder_courses_in_learning_path(path_id: int, user_id: str, ordered_course_
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] != 'ACTIVE':
+            if row[0] not in ('ACTIVE', 'STUDYING'):
                 return {"error": "Chỉ có thể sắp xếp lại khóa học trong lộ trình đang hoạt động."}
             for idx, course_id in enumerate(ordered_course_ids):
                 cur.execute('UPDATE course_learning_path SET course_order_number = %s WHERE learning_path_id = %s AND course_id = %s;', (idx+1, path_id, course_id))

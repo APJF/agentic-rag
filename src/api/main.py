@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .endpoints import chat, sessions, planner, learning, reviewer, speaking, dispatcher, messages
+from src.config import settings
 
 app = FastAPI(
     title="Trợ lý ảo Tiếng Nhật API",
@@ -10,11 +11,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-origins = [
-    "http://localhost:5173",
-    "http://localhost",
-    "http://localhost:8080",
-]
+origins = []
+if settings.CORS_ALLOW_ORIGINS:
+    origins = [o.strip() for o in settings.CORS_ALLOW_ORIGINS.split(',') if o.strip()]
+else:
+    origins = [
+        settings.FRONTEND_BASE_URL,
+        "http://localhost",
+        "http://localhost:8080",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,7 +32,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["Session Manag
 app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
 app.include_router(planner.router, prefix="/planner", tags=["Learning Path Planner"])
 app.include_router(dispatcher.router, prefix="", tags=["Dispatcher"])
-app.include_router(reviewer.router, prefix="/exam", tags=["Exam Overview"])  # new
+app.include_router(reviewer.router, prefix="/api/exam", tags=["Exam Overview"])  # new
 
 @app.get("/", tags=["Root"])
 async def read_root():

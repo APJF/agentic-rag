@@ -9,6 +9,7 @@ from ...core.database import execute_sql_query
 from ...core.embedding import get_embedding_model
 from ...core.session_manager import update_session_context
 from ...core.database import get_db_connection
+from ...config import settings
 
 embedding_model = get_embedding_model()
 
@@ -166,7 +167,7 @@ def list_available_level_tests_tool(level: Optional[str] = None) -> Dict[str, An
 @tool
 def generate_level_test_link_tool(level: str) -> str:
     """
-    Trả về link làm bài test theo level: localhost:5173/exam/{examId}/preparation.
+    Trả về link làm bài test theo level: {FRONTEND_BASE_URL}/exam/{examId}/preparation.
     Tự chọn examId phù hợp (ưu tiên DB, fallback danh sách mặc định).
     """
     lv = (level or "").upper()
@@ -176,7 +177,8 @@ def generate_level_test_link_tool(level: str) -> str:
         exam_id = items[0].get("exam_id")
     if not exam_id:
         exam_id = f"Test-JLPT-{lv}-exam01"
-    return f"Hãy mở link để làm bài test: localhost:5173/exam/{exam_id}/preparation"
+    base = settings.FRONTEND_BASE_URL.rstrip('/')
+    return f"Hãy mở link để làm bài test: {base}/exam/{exam_id}/preparation"
 
 
 @tool

@@ -94,7 +94,7 @@ def get_intent_and_redirect(req: str, session_type: Optional[str]) -> tuple[str,
 
     return intent, redirect_link, ai_response
 
-@router.post("/chat", response_model=ChatMultiResponse)
+@router.post("/chat", response_model=ChatMultiResponse, include_in_schema=False)
 async def chat_dispatcher(request: ChatRequest = Body(...)):
     session_id = request.session_id
     user_input = request.user_input
@@ -148,7 +148,7 @@ async def chat_dispatcher(request: ChatRequest = Body(...)):
 
     return ChatMultiResponse(session_id=session_id, results=results)
 
-@router.post("/chat/edit_and_resubmit", response_model=ChatResponse)
+@router.post("/chat/edit_and_resubmit", response_model=ChatResponse, include_in_schema=False)
 async def edit_and_resubmit_message(request: ChatEditRequest = Body(...)):
     success = rewind_last_turn(request.session_id)
     if not success:
