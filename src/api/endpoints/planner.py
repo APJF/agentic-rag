@@ -10,4 +10,3 @@ from langchain_core.messages import HumanMessage, AIMessage
 planner_agent_executor = initialize_planning_agent()
 router = APIRouter()
 
-# Đã chuyển endpoint /chat sang dispatcher. Nếu có hàm đặc thù, giữ lại, còn lại comment hoặc xóa endpoint /chat.

@@ -28,7 +28,6 @@ from ...core.database import get_db_connection
 
 router = APIRouter()
 
-# ===== Helpers to reduce complexity =====
 def _deep_has_key(obj: dict, keys: List[str]) -> bool:
     if not isinstance(obj, dict):
         return False
@@ -66,17 +65,14 @@ def _infer_intent(session_type: Optional[str], context: Optional[dict], first_me
 def _derive_planner_context_from_text(text: str) -> Dict[str, Any]:
     t = (text or "").lower()
     ctx: Dict[str, Any] = {}
-    # current level inference
     if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
         ctx["current_level"] = "N5_L"
-    # learning goal / target level
     import re as _re
     m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
     if m_target and ("học" in t or "thi" in t or "jlpt" in t):
         target = m_target.group(1).upper()
         ctx["learning_goal"] = f"JLPT {target}"
         ctx["target_level"] = target
-    # deadline "trong năm nay"
     if "trong năm nay" in t:
         now = datetime.now(timezone.utc) + timedelta(hours=7)
         deadline = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
@@ -142,18 +138,14 @@ async def _generate_session_name(first_message: str, intent: str) -> str:
     return f"Chat: {first_message[:20]}"
 
 
-# ===== End helpers =====
-# CREATE: POST /api/sessions
 @router.post("/", response_model=ChatInitiateResponse)
 async def create_session(request: ChatInitiateRequest = Body(...)):
-    # Validate user exists (ignore return here, API vẫn tạo nếu không tìm thấy user?)
     get_user(str(request.user_id))
 
     intent = _infer_intent(request.session_type, request.context, request.first_message)
 
     session_name = await _generate_session_name(request.first_message, intent)
 
-    # Seed context for planner: derive info from first_message and user profile
     merged_context: Dict[str, Any] = dict(request.context or {})
     if intent == "planner":
         derived = _derive_planner_context_from_text(request.first_message)
@@ -202,11 +194,9 @@ async def create_session(request: ChatInitiateRequest = Body(...)):
         ai_first_response=ai_response_text
     )
 
-# LIST: GET /api/sessions?user_id=...
 @router.get("/", response_model=SessionListResponse)
 async def list_sessions(user_id: str = Query(..., description="ID người dùng")):
     sessions_raw = list_sessions_for_user(str(user_id))
-    # Chuẩn hóa khóa 'name' -> 'session_name' để khớp schema và convert UTC->UTC+7
     sessions_norm = []
     for s in sessions_raw:
         created_at = s.get("created_at")
@@ -227,7 +217,6 @@ async def list_sessions(user_id: str = Query(..., description="ID người dùng
         })
     return SessionListResponse(user_id=user_id, sessions=sessions_norm)
 
-# DETAIL: GET /api/sessions/{id}
 @router.get("/{session_id}", response_model=HistoryResponse)
 async def get_session_detail(session_id: int = Path(...)):
     def _detect_message_time_column(cur) -> Optional[str]:
@@ -306,7 +295,6 @@ async def get_session_detail(session_id: int = Path(...)):
             conn.close()
     return HistoryResponse(session_id=session_id, messages=messages)
 
-# UPDATE: PUT /api/sessions/{id} (toàn phần) và PATCH /api/sessions/{id} (một phần)
 from pydantic import BaseModel
 class SessionUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -317,7 +305,6 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
     updated = False
     if request.name:
         updated = rename_session(session_id, request.name)
-    # Cập nhật context nếu có
     if request.context:
         from ...core.session_manager import update_session_context
         updated = update_session_context(session_id, request.context) or updated
@@ -326,7 +313,6 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
     info = get_session_info(session_id)
     if not info:
         raise HTTPException(status_code=404, detail="Không tìm thấy phiên.")
-    # convert UTC -> UTC+7
     created_utc7 = (info["created_at"] + timedelta(hours=7)) if info.get("created_at") else None
     updated_utc7 = (info["updated_at"] + timedelta(hours=7)) if info.get("updated_at") else None
     return SessionInfo(id=info["id"], session_name=info["name"], type=info.get("type"), created_at=created_utc7, updated_at=updated_utc7)
@@ -335,7 +321,7 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
 async def patch_session(session_id: int, request: SessionUpdateRequest = Body(...)):
     return await put_session(session_id, request)
 
-# DELETE: DELETE /api/sessions/{id}
+
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session_endpoint(session_id: int = Path(...)):
     if not delete_session(session_id):

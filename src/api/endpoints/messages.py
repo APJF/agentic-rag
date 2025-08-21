@@ -61,14 +61,12 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if not session_data:
         raise HTTPException(status_code=404, detail=f"Phiên {request.session_id} không tồn tại.")
 
-    # Xác định loại phiên sớm để dùng trong các nhánh xử lý phía dưới
     session_type = (session_data.get("type") or "qna").lower()
 
     human_id = _insert_message(request.session_id, "human", request.user_input)
     if human_id is None:
         raise HTTPException(status_code=500, detail="Không thể lưu tin nhắn người dùng.")
 
-    # Nếu người dùng trả lời ngắn gọn 'có/không', set context để agent hiểu nhánh cần thực hiện
     normalized = request.user_input.strip().lower()
     flag_value: Optional[str] = None
     if normalized in {"có", "co", "yes", "y", "ok", "đúng", "dung"}:
@@ -78,7 +76,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         flag_value = "no"
         update_session_context(request.session_id, {"confirm_previous_question": flag_value})
 
-    # Nhận diện người dùng đã làm xong bài test và muốn tiếp tục
     exam_completed_flag = False
     if normalized in {
         "tiếp tục", "tiep tuc", "đã hoàn thành", "da hoan thanh", "hoàn thành", "hoan thanh",
@@ -87,10 +84,8 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         exam_completed_flag = True
         update_session_context(request.session_id, {"exam_completed": "yes"})
 
-    # Planner: phân biệt xác nhận theo câu hỏi AI gần nhất
     if session_type == "planner" and flag_value in {"yes", "no"}:
         try:
-            # last AI message trước khi user trả lời hiện tại
             last_msgs = session_data.get("history", [])
             last_ai_text = None
             for m in reversed(last_msgs):
@@ -107,12 +102,10 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                 if asked_about_test:
                     if flag_value == "no":
                         update_session_context(request.session_id, {"skip_level_test": True})
-                    else:  # yes
+                    else:
                         update_session_context(request.session_id, {"wants_level_test": True})
                 elif asked_about_deletion:
-                    # Cờ xác nhận xóa môn
                     payload = {"confirm_delete_courses": flag_value}
-                    # Cố gắng trích xuất danh sách course_id xuất hiện trong thông điệp AI gần nhất
                     try:
                         course_ids = list({m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)})
                         if course_ids:
@@ -121,7 +114,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                         pass
                     update_session_context(request.session_id, payload)
                 elif asked_about_addition:
-                    # Cờ xác nhận thêm môn
                     payload = {"confirm_add_courses": flag_value}
                     try:
                         course_ids = list({m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)})
@@ -131,10 +123,8 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                         pass
                     update_session_context(request.session_id, payload)
                 elif asked_about_reorder:
-                    # Cờ xác nhận đổi thứ tự môn
                     payload = {"confirm_reorder_courses": flag_value}
                     try:
-                        # Bắt danh sách các mã môn xuất hiện trong câu AI; nếu có đúng 2 mã, coi như swap cặp này
                         course_ids = [m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)]
                         if course_ids:
                             payload["pending_reorder_courses"] = course_ids
@@ -157,7 +147,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     if not agent:
         raise HTTPException(status_code=500, detail="Agent không khả dụng.")
 
-    # Reload session_data to get updated context
     session_data = load_session_data(request.session_id) or session_data
 
     input_data = {
@@ -167,35 +156,30 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         "context": session_data.get("context", {})
     }
     if session_type == "planner":
-        set_session_user_id(session_data["user_id"])  # đảm bảo tool dùng đúng user_id
+        set_session_user_id(session_data["user_id"])
     if session_type == "qna":
         try:
             set_qna_session_id(int(request.session_id))
         except Exception:
             pass
 
-    # Heuristic: cập nhật context tự động cho planner dựa trên user_input
     if session_type == "planner":
         def _derive_planner_context(text: str) -> Dict[str, Any]:
             t = (text or "").lower()
             ctx: Dict[str, Any] = {}
-            # current level inference
             if any(k in t for k in ["mới học", "moi hoc", "chưa biết gì", "chua biet gi", "newbie", "bắt đầu", "bat dau"]):
                 ctx["current_level"] = "N5_L"
-            # learning goal / target level
             import re as _re
             m_target = _re.search(r"\b(n5|n4|n3|n2|n1)\b", t)
             if m_target and ("học" in t or "thi" in t or "jlpt" in t):
                 target = m_target.group(1).upper()
                 ctx["learning_goal"] = f"JLPT {target}"
                 ctx["target_level"] = target
-            # deadline "trong năm nay"
             if "trong năm nay" in t:
                 from datetime import datetime, timezone, timedelta
                 now = datetime.now(timezone.utc) + timedelta(hours=7)
                 deadline = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
                 ctx["deadline_info"] = deadline.isoformat()
-            # skills
             skills = []
             if any(k in t for k in ["nghe"]): skills.append("LISTENING")
             if any(k in t for k in ["nói", "noi"]): skills.append("SPEAKING")
@@ -205,17 +189,14 @@ async def create_message(request: MessageCreateRequest = Body(...)):
             if any(k in t for k in ["tất cả", "tat ca", "tổng hợp", "tong hop"]): skills.append("ALL")
             if skills:
                 ctx["focus_skills"] = skills
-            # skip test
             if any(k in t for k in ["không cần test", "khong can test", "không cần kiểm tra", "khong can kiem tra"]):
                 ctx["skip_level_test"] = True
             return ctx
 
         try:
-            # Merge với context hiện tại để tránh ghi đè mất dữ liệu
             derived = _derive_planner_context(request.user_input)
             if derived:
                 update_session_context(request.session_id, derived)
-                # Nếu user phát lộ thông tin chắc chắn về level/target, đồng bộ vào bảng users
                 if derived.get("current_level"):
                     try:
                         from ...core.database import get_db_connection
@@ -231,14 +212,11 @@ async def create_message(request: MessageCreateRequest = Body(...)):
 
     result = agent.invoke(input_data)
     ai_response_text = result.get("output", "Lỗi: Agent không có output.")
-    # Sanitize: chỉ trả Final Answer cho frontend, ẩn Thought/Action nếu lỡ in ra
     try:
-        # Nếu có "Final Answer:" thì chỉ lấy phần sau đó
         m = re.search(r"Final Answer:\s*(.*)", ai_response_text, re.DOTALL | re.IGNORECASE)
         if m:
             ai_response_text = m.group(1).strip()
         else:
-            # Loại bỏ các dòng bắt đầu bằng "Thought:" hoặc "Action:"
             lines = []
             for line in ai_response_text.splitlines():
                 if re.match(r"\s*(Thought|Action)\s*:\s*", line, flags=re.IGNORECASE):
@@ -248,17 +226,14 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     except Exception:
         pass
 
-    # Nếu agent vừa tạo một bộ câu hỏi, tự động lưu vào session.context để lần sau chấm đáp án được
     def _extract_quiz_from_text(text: str) -> List[Dict[str, Any]]:
         try:
             lines = [ln.rstrip() for ln in text.splitlines()]
             questions: List[Dict[str, Any]] = []
             current: Dict[str, Any] = {}
             for ln in lines:
-                # Match question like: "1. ..." (tiếp theo có thể là văn bản)
                 m_q = re.match(r"^\s*(\d+)\s*\.(.*)$", ln)
                 if m_q:
-                    # push previous
                     if current:
                         questions.append(current)
                         current = {}
@@ -278,7 +253,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                     elif re.search(r"ngữ pháp|grammar", text, re.IGNORECASE):
                         current["scope"] = "GRAMMAR"
                     continue
-                # Match choice like: "A. ..."
                 m_c = re.match(r"^\s*([A-Da-d])\s*\.(.*)$", ln)
                 if m_c and current:
                     opt = m_c.group(1).upper()
@@ -286,7 +260,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                     current.setdefault("choices", []).append(f"{opt}. {ctext}")
             if current:
                 questions.append(current)
-            # lọc bỏ entries thiếu topic/choices
             questions = [q for q in questions if q.get("topic")]
             return questions
         except Exception:
@@ -299,15 +272,12 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         except Exception:
             pass
 
-    # Clear flag để tránh xử lý lặp lại ở lượt sau
     if flag_value is not None:
         update_session_context(request.session_id, {"confirm_previous_question": ""})
 
-    # Dọn các cờ planner sau khi đã invoke agent để tránh lặp ở lượt kế
     if session_type == "planner":
         try:
             clear_payload: Dict[str, Any] = {}
-            # confirm flags về chuỗi rỗng, pending list về []
             for k in [
                 "confirm_add_courses",
                 "confirm_delete_courses",
@@ -323,9 +293,7 @@ async def create_message(request: MessageCreateRequest = Body(...)):
         except Exception:
             pass
 
-    # Bắt examId từ link AI đã gửi để lưu vào context, phục vụ lần sau tự check kết quả
     try:
-        # dạng link: <FRONTEND>/exam/<examId>/preparation
         m = re.search(r"exam/([^/]+)/preparation", ai_response_text)
         if m:
             exam_id_captured = m.group(1)
@@ -333,7 +301,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
     except Exception:
         pass
 
-    # Nếu trước đó set exam_completed, sau khi đã phản hồi thì xóa cờ để tránh lặp
     if exam_completed_flag:
         update_session_context(request.session_id, {"exam_completed": ""})
 
