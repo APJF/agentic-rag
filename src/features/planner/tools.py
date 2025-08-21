@@ -94,6 +94,41 @@ class ReorderCoursesInput(BaseModel):
     ordered_course_ids: List[str] = Field(...)
 
 @tool
+def set_primary_learning_path(path_id: int, user_id: Union[str, int]) -> dict:
+    """
+    Đặt lộ trình có `path_id` làm lộ trình chính (STUDYING) cho user.
+    - Chuyển các lộ trình đang STUDYING/ACTIVE khác về PENDING.
+    - Chỉ thực hiện nếu lộ trình thuộc về user.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "Không thể kết nối database."}
+    try:
+        with conn.cursor() as cur:
+            user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+            if user_id_int is None:
+                return {"error": "user_id không hợp lệ."}
+            # Verify ownership
+            cur.execute('SELECT 1 FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id_int))
+            if not cur.fetchone():
+                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
+            # Demote current studying to pending
+            cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', (
+                'PENDING', user_id_int, 'STUDYING'
+            ))
+            # Promote selected path
+            cur.execute('UPDATE learning_path SET status = %s, last_updated_at = NOW() WHERE id = %s AND user_id = %s;', (
+                'STUDYING', path_id, user_id_int
+            ))
+            conn.commit()
+            return {"success": True}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+@tool
 def list_learning_paths(user_id: Union[str, int]) -> dict:
     """
     Lấy danh sách lộ trình học (active và archived) của user.
@@ -257,7 +292,7 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] not in ('ACTIVE', 'STUDYING'):
+            if row[0] not in ('STUDYING',):
                 return {"error": "Chỉ có thể thêm khóa học vào lộ trình đang hoạt động."}
             # Lấy order number lớn nhất hiện có
             cur.execute('SELECT COALESCE(MAX(course_order_number), 0) FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
@@ -291,7 +326,7 @@ def reorder_courses_in_learning_path(path_id: int, user_id: str, ordered_course_
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
-            if row[0] not in ('ACTIVE', 'STUDYING'):
+            if row[0] not in ('STUDYING',):
                 return {"error": "Chỉ có thể sắp xếp lại khóa học trong lộ trình đang hoạt động."}
             for idx, course_id in enumerate(ordered_course_ids):
                 cur.execute('UPDATE course_learning_path SET course_order_number = %s WHERE learning_path_id = %s AND course_id = %s;', (idx+1, path_id, course_id))
@@ -346,6 +381,79 @@ def find_relevant_courses(target_level: str, focus_skill: str, learning_goal: st
             courses = [{"id": r[0], "title": r[1]} for r in rows]
             return {"success": True, "courses": courses}
     except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+@tool
+def suggest_next_course_for_level(path_id: int, user_id: Union[str, int], level: str) -> dict:
+    """
+    Gợi ý môn tiếp theo cho một level (ví dụ 'N4') chưa có trong lộ trình `path_id`.
+    Dựa trên manifest `courses_by_level(level)` rồi loại bỏ các môn đã có.
+    """
+    try:
+        user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+        if user_id_int is None:
+            return {"error": "user_id không hợp lệ."}
+        # Lấy danh sách course hiện có trong lộ trình
+        existing = execute_sql_query(
+            'SELECT course_id FROM course_learning_path WHERE learning_path_id = %s ORDER BY course_order_number ASC;',
+            (path_id,)
+        ) or []
+        existing_ids = [row.get('course_id') or row.get('course_id') for row in existing]
+        candidates = courses_by_level(level.upper()) or []
+        for cid in candidates:
+            if cid not in existing_ids:
+                return {"success": True, "course_id": cid}
+        return {"error": "Không còn môn mới cho level này trong manifest."}
+    except Exception as e:
+        return {"error": str(e)}
+
+@tool
+def add_next_course_for_level(path_id: int, user_id: Union[str, int], level: str) -> dict:
+    """
+    Thêm môn kế tiếp (theo manifest) ở level chỉ định vào cuối lộ trình `path_id` nếu chưa có.
+    Chỉ hoạt động khi lộ trình đang STUDYING.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "Không thể kết nối database."}
+    try:
+        with conn.cursor() as cur:
+            user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+            if user_id_int is None:
+                return {"error": "user_id không hợp lệ."}
+            # verify ownership and status
+            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id_int))
+            row = cur.fetchone()
+            if not row:
+                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
+            if row[0] != 'STUDYING':
+                return {"error": "Chỉ có thể thêm khi lộ trình đang hoạt động (STUDYING)."}
+            # existing ids
+            cur.execute('SELECT course_id FROM course_learning_path WHERE learning_path_id = %s ORDER BY course_order_number ASC;', (path_id,))
+            existing_ids = [r[0] for r in cur.fetchall()]
+            candidates = courses_by_level(level.upper()) or []
+            next_id = None
+            for cid in candidates:
+                if cid not in existing_ids:
+                    next_id = cid
+                    break
+            if not next_id:
+                return {"error": "Không còn môn mới cho level này trong manifest."}
+            # verify course exists in DB
+            cur.execute('SELECT 1 FROM course WHERE id = %s;', (next_id,))
+            if not cur.fetchone():
+                return {"error": f"Môn {next_id} chưa có trong CSDL."}
+            # append to end
+            cur.execute('SELECT COALESCE(MAX(course_order_number), 0) FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
+            last_order = cur.fetchone()[0]
+            cur.execute('INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES (%s, %s, %s);', (next_id, path_id, last_order + 1))
+            cur.execute('UPDATE learning_path SET last_updated_at = NOW() WHERE id = %s;', (path_id,))
+            conn.commit()
+            return {"success": True, "added_course_id": next_id, "new_order": last_order + 1}
+    except Exception as e:
+        conn.rollback()
         return {"error": str(e)}
     finally:
         conn.close()

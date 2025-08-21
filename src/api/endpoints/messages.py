@@ -86,6 +86,7 @@ async def create_message(request: MessageCreateRequest = Body(...)):
 
     if session_type == "planner" and flag_value in {"yes", "no"}:
         try:
+
             last_msgs = session_data.get("history", [])
             last_ai_text = None
             for m in reversed(last_msgs):
@@ -98,6 +99,13 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                 asked_about_deletion = any(k in low for k in ["xóa", "xoá", "xoa", "bỏ môn", "bo mon", "remove", "delete"])  # chỉ khi có từ khóa xóa
                 asked_about_addition = any(k in low for k in ["thêm", "them", "add", "bổ sung", "bo sung"])  # chỉ khi có từ khóa thêm
                 asked_about_reorder = any(k in low for k in ["đổi vị trí", "doi vi tri", "đổi thứ tự", "doi thu tu", "reorder", "sắp xếp lại", "sap xep lai", "swap"])  
+                # Lộ trình: xóa lộ trình / đặt làm lộ trình chính
+                asked_about_path_delete = any(k in low for k in [
+                    "xóa lộ trình", "xoa lo trinh", "xóa lộ trình hiện tại", "xoa lo trinh hien tai", "archive lộ trình", "archive lo trinh"
+                ])
+                asked_about_set_primary = any(k in low for k in [
+                    "đặt làm lộ trình chính", "dat lam lo trinh chinh", "đặt chính", "dat chinh", "set primary", "make primary"
+                ])
 
                 if asked_about_test:
                     if flag_value == "no":
@@ -105,6 +113,7 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                     else:
                         update_session_context(request.session_id, {"wants_level_test": True})
                 elif asked_about_deletion:
+
                     payload = {"confirm_delete_courses": flag_value}
                     try:
                         course_ids = list({m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)})
@@ -125,11 +134,55 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                 elif asked_about_reorder:
                     payload = {"confirm_reorder_courses": flag_value}
                     try:
+                        # Bắt danh sách các mã môn xuất hiện trong câu AI; nếu có đúng 2 mã, coi như swap cặp này
                         course_ids = [m.group(0) for m in re.finditer(r"\b[A-Z]{3}\d{3}\b", last_ai_text)]
                         if course_ids:
                             payload["pending_reorder_courses"] = course_ids
                             if len(course_ids) == 2:
                                 payload["pending_reorder_swap"] = course_ids
+                        # Bắt chỉ số from/to trong câu cảnh báo: "môn thứ X ... vị trí thứ Y"
+                        m_from = re.search(r"môn\s+thứ\s+(\d+)", low)
+                        m_to = re.search(r"vị\s*trí\s*thứ\s*(\d+)", low)
+                        if m_from:
+                            payload["pending_reorder_move_from"] = int(m_from.group(1))
+                        if m_to:
+                            payload["pending_reorder_move_to"] = int(m_to.group(1))
+                    except Exception:
+                        pass
+                    update_session_context(request.session_id, payload)
+                elif asked_about_path_delete:
+                    payload = {"confirm_delete_learning_path": flag_value}
+                    try:
+                        if any(k in low for k in ["hiện tại", "hien tai", "current"]):
+                            payload["pending_delete_learning_path"] = "current"
+                        ids = set()
+                        for rx in [
+                            r"path[\s_-]*id\s*[:#]?\s*(\d+)",
+                            r"\bid\s*[:#]?\s*(\d+)",
+                            r"#\s*(\d+)"
+                        ]:
+                            ids.update(re.findall(rx, last_ai_text, flags=re.IGNORECASE))
+                        if ids:
+                            payload["pending_delete_learning_path_ids"] = [int(i) for i in ids if str(i).isdigit()]
+                    except Exception:
+                        pass
+                    update_session_context(request.session_id, payload)
+                elif asked_about_set_primary:
+                    payload = {"confirm_set_primary_path": flag_value}
+                    try:
+                        if any(k in low for k in ["hiện tại", "hien tai", "current"]):
+                            payload["pending_primary_path_id"] = "current"
+                        ids = set()
+                        for rx in [
+                            r"path[\s_-]*id\s*[:#]?\s*(\d+)",
+                            r"\bid\s*[:#]?\s*(\d+)",
+                            r"#\s*(\d+)"
+                        ]:
+                            ids.update(re.findall(rx, last_ai_text, flags=re.IGNORECASE))
+                        if ids:
+                            id_one = next(iter(ids))
+                            if str(id_one).isdigit():
+                                payload["pending_primary_path_id"] = int(id_one)
                     except Exception:
                         pass
                     update_session_context(request.session_id, payload)
@@ -245,7 +298,6 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                         "scope": None,
                         "choices": []
                     }
-                    # Heuristic: detect scope by header keywords
                     if re.search(r"kanji", text, re.IGNORECASE):
                         current["scope"] = "KANJI"
                     elif re.search(r"vocab|từ vựng", text, re.IGNORECASE):
@@ -282,13 +334,28 @@ async def create_message(request: MessageCreateRequest = Body(...)):
                 "confirm_add_courses",
                 "confirm_delete_courses",
                 "wants_level_test",
+                "confirm_delete_learning_path",
+                "confirm_set_primary_path",
             ]:
                 clear_payload[k] = ""
             for k in [
                 "pending_add_courses",
                 "pending_delete_courses",
+                "pending_delete_learning_path_ids",
             ]:
                 clear_payload[k] = []
+            for k in [
+                "pending_reorder_courses",
+                "pending_reorder_swap",
+            ]:
+                clear_payload[k] = []
+            for k in [
+                "pending_primary_path_id",
+                "pending_delete_learning_path",
+                "pending_reorder_move_from",
+                "pending_reorder_move_to",
+            ]:
+                clear_payload[k] = ""
             update_session_context(request.session_id, clear_payload)
         except Exception:
             pass
