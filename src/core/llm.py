@@ -25,8 +25,6 @@ else:
 
 def get_llm():
     if not llm:
-        # Không ném lỗi để tránh làm app crash khi import router/agent lúc startup
-        # Trả về None để các nơi gọi có thể tự degrade hoặc xử lý phù hợp
         print("LLM was not successfully initialized. Please check previous errors or OPENAI_API_KEY.")
         return None
     return llm

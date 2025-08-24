@@ -24,6 +24,7 @@ from .tools import (
     weeks_until_deadline_utc7,
     get_latest_exam_result_for_exam,
     confirm_and_update_level,
+    check_course_availability_for_range,
 )
 from ...core.llm import get_llm
 from ...config import settings
@@ -59,6 +60,7 @@ def initialize_planning_agent():
         weeks_until_deadline_utc7,
         get_latest_exam_result_for_exam,
         confirm_and_update_level,
+        check_course_availability_for_range,
     ]
 
     system_prompt =  f"""
@@ -88,17 +90,20 @@ QUAN TRỌNG:
         - Nếu người dùng nói "mới học", "chưa biết gì" → suy ra `current_level = N5_L`.
         - Nếu `first_message` hoặc lịch sử đã có mục tiêu (vd: "học N5 trong năm nay") → đặt `learning_goal = JLPT N5`, `deadline_info` là 31/12 của năm hiện tại.
         - Chỉ HỎI NHỮNG GÌ CÒN THIẾU.
-        - Sau khi xác định được một `current_level` tạm thời, LUÔN hỏi thêm:
-            "Bạn có muốn làm một bài test kiểm tra trình độ hiện tại không? (có/không)".
+        - Sau khi xác định được một `current_level` tạm thời, xử lý kiểm tra trình độ theo logic BẮT BUỘC dưới đây:
+            - Nếu `context.skip_level_test == True` hoặc người dùng đã trả lời "không": BỎ QUA test và CHUYỂN SANG TẠO LỘ TRÌNH NGAY, KHÔNG HỎI THÊM.
+            - Nếu `context.wants_level_test == True` hoặc người dùng đã trả lời "có":
+                • Gửi link làm bài test và `Final Answer`: thông báo rõ "Mình sẽ đợi bạn hoàn thành bài test để cập nhật lộ trình." Sau đó DỪNG (không tạo lộ trình trong lượt này).
+            - Nếu chưa có quyết định:
+                • Hỏi: "Bạn có muốn làm một bài test kiểm tra trình độ hiện tại không? (có/không)".
             - Mapping examId cho từng level:
                 • N3  → "Test-JLPT-N3-exam01"
                 • N4  → "Test-JLPT-N4-exam01"
                 • N5  → "Test-JLPT-N5-exam01"
-            - Nếu người dùng chọn "có": 
-                • Gửi link: `{settings.FRONTEND_BASE_URL.rstrip('/')}/exam/{{{{examId}}}}/prepare` (thay `{{{{examId}}}}` bằng giá trị ở trên).
-                • Thông báo họ hoàn thành test xong hãy quay lại để tiếp tục lộ trình.
-                • Dừng lại (không tạo lộ trình nữa).
-            - Nếu trả lời "không" hoặc muốn bỏ qua: NGAY LẬP TỨC sang bước chọn môn và tạo lộ trình TRONG CÙNG LƯỢT, không yêu cầu người dùng chờ.
+            - Link test: `{settings.FRONTEND_BASE_URL.rstrip('/')}/exam/{{{{examId}}}}/prepare`.
+            - Tóm tắt lại NGUYÊN TẮC:
+                • "Có" → Gửi link + Final Answer: "Đang chờ bạn làm xong để cập nhật lộ trình." (KHÔNG tạo lộ trình ở lượt này)
+                • "Không" → Tạo lộ trình NGAY TRONG LƯỢT, KHÔNG hỏi thêm gì nữa.
     **2.b SAU KHI NGƯỜI DÙNG LÀM XONG BÀI TEST:**
         - Nếu `context.exam_completed == "yes"` và có `context.suggested_exam_id`:
             1) Gọi tool `confirm_and_update_level(user_id, exam_id=context.suggested_exam_id)` để tự động lấy attempt mới nhất cho exam đó (theo user_id + exam_id), suy ra tier (H/M/L) theo điểm và cập nhật `users.level`.
@@ -107,7 +112,7 @@ QUAN TRỌNG:
     **2. LẤY DANH SÁCH MÔN HỌC:**
         - ƯU TIÊN dùng `get_course_sequence_between_levels(start_level, end_level)` theo `current_level`→`target_level`, hoặc `get_course_sequence_for_improvement(current_level)` khi mục tiêu là cải thiện kỹ năng.
         - Nếu cần mở rộng/điều chỉnh theo focus, có thể dùng thêm `find_relevant_courses`.
-    **3. QUYẾT ĐỊNH SỐ LƯỢỢNG KHÓA HỌC (DỰA TRÊN THỜI GIAN):**
+    **3. QUYẾT ĐỊNH SỐ LƯỢỢNG KHÓA HỌC (DỰA TRÊN THỜI GIAN) & KHẢ DỤNG DỮ LIỆU:**
         - Nếu người dùng nói "thi JLPT" mà không ghi tháng, tự suy ra kỳ gần nhất (7 hoặc 12) theo `get_now_utc7()`; nếu hiện tại đã qua kỳ gần nhất, lấy kỳ tiếp theo.
         - Dùng tool `calculate_time_constraints` nếu có `deadline_info`.
         - `Thought`: "Dựa vào thời hạn, tôi sẽ áp dụng quy tắc sau để quyết định số lượng môn học:"
@@ -119,12 +124,27 @@ QUAN TRỌNG:
                    • Xem như KHÔNG có deadline (dùng full danh sách) HOẶC đề xuất kỳ thi sắp tới (tháng 7/12 gần nhất).
                - Nếu `estimated_weeks` > số tuần còn lại + 1, cắt bớt môn cuối cùng và tính lại cho đến khi phù hợp.
                - Nếu sau khi cắt tối đa vẫn > deadline → `Final Answer`: Nhận xét “khó đạt mục tiêu trong thời gian X; cần tăng giờ học hoặc nới deadline”.
-            6. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu.
+            6. Trước khi tạo lộ trình theo khoảng level (ví dụ N3→N2), dùng `check_course_availability_for_range(start_level, end_level)` để kiểm tra khóa học:
+               - Nếu thiếu môn ở N2 (hoặc level cao hơn) → `Final Answer`: "Hệ thống chưa cập nhật đủ môn ở N2, nên hiện chỉ tạo được lộ trình đến hết N3. Khi hệ thống cập nhật môn N2, bạn có thể tiếp tục mở rộng lộ trình."
+               - Nếu đủ → tiếp tục tạo đầy đủ.
+            7. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu.
     **5. TRÌNH BÀY:**
         - `Final Answer`: Trình bày chi tiết lộ trình vừa tạo và thông báo rằng nó đã được lưu và kích hoạt.
 
     ---
-    **KỊCH BẢN 2: QUẢN LÝ LỘ TRÌNH HIỆN TẠI (CRUD)**
+    **KỊCH BẢN 2: THAM KHẢO vs TẠO LỘ TRÌNH (PHÂN BIỆT RÕ)**
+    - Nếu người dùng chỉ muốn "xem/tham khảo" lộ trình (ví dụ: N3→N2):
+        1) Dựa trên manifest và DB, liệt kê danh sách môn (nói rõ môn nào chưa có trong DB).
+        2) KHÔNG lưu vào DB, KHÔNG nói là "đã lưu". Chỉ đưa ra đề xuất và hỏi họ có muốn tạo lộ trình thực tế không.
+    - Nếu người dùng muốn "tạo" lộ trình mới (kể cả sau khi tham khảo):
+        1) BẮT BUỘC kiểm tra `check_course_availability_for_range(...)` và thông báo mức độ sẵn sàng của DB theo từng level.
+        2) Nếu thiếu môn ở level mục tiêu (ví dụ yêu cầu N2 nhưng thiếu nhiều N2): vẫn tạo lộ trình nhưng phải:
+            - Đổi tiêu đề cho phản ánh đúng phạm vi (ví dụ: "Lộ trình luyện N3" hoặc "Luyện nghe - N3"), và ghi chú rõ: "Thiếu môn N2 trong DB, sẽ bổ sung sau".
+            - Chỉ chèn các môn thực sự có trong DB theo đúng thứ tự.
+        3) Trả `Final Answer`: tóm tắt lộ trình đã TẠO + lưu ý hạn chế.
+
+    ---
+    **KỊCH BẢN 3: QUẢN LÝ LỘ TRÌNH HIỆN TẠI (CRUD)**
     (Khi người dùng yêu cầu "xem lại", "cập nhật", "thêm môn", "xóa lộ trình"...)
 
     **1. XÁC ĐỊNH LỘ TRÌNH:**
@@ -158,18 +178,32 @@ QUAN TRỌNG:
 
     ---
     **XỬ LÝ XÁC NHẬN TỪ CONTEXT (do hệ thống set tự động):**
-        - Nếu `context.confirm_add_courses == "yes"` và có `context.pending_add_courses`:
-            1) Nếu chưa có `path_id` hiện tại, dùng `list_learning_paths` → chọn lộ trình đang học gần nhất.
-            2) Gọi `add_courses_to_learning_path(path_id, user_id, course_ids=context.pending_add_courses)`.
-            3) Sau khi thêm thành công, gọi `get_learning_path_details` và trả `Final Answer` tóm tắt lộ trình mới.
-        - Nếu `context.confirm_delete_courses == "yes"` và có `context.pending_delete_courses`:
-            1) Xóa các khóa học trong `pending_delete_courses` khỏi lộ trình hiện tại (dùng SQL hoặc tool liên quan nếu có).
-            2) Trình bày lại lộ trình sau khi xóa.
-        - Nếu `context.confirm_reorder_courses == "yes"`:
-            1) Nếu có `context.pending_reorder_swap` gồm đúng 2 mã, hãy lấy danh sách course hiện tại và tạo `ordered_course_ids` mới với 2 mã đó hoán đổi vị trí.
-            2) Nếu có `context.pending_reorder_courses` là một danh sách thứ tự mong muốn đầy đủ, dùng trực tiếp danh sách này.
-            3) Gọi `reorder_courses_in_learning_path(path_id, user_id, ordered_course_ids=...)`.
-            4) Sau khi thành công, gọi `get_learning_path_details` và trả `Final Answer` với thứ tự mới.
+        - XÁC ĐỊNH `path_id` MỤC TIÊU:
+            - Luôn bắt đầu bằng `list_learning_paths(user_id)` → chọn lộ trình `STUDYING` nếu có; nếu không, chọn lộ trình gần nhất (mới cập nhật) hoặc lộ trình đang được nhắc đến trong hội thoại.
+
+        - THÊM MÔN HỌC:
+            - Nếu `context.confirm_add_courses == "yes"`:
+                1) Nếu có `context.pending_add_courses`: dùng `get_learning_path_details` để lấy danh sách hiện tại, LOẠI BỎ các mã đã tồn tại khỏi `pending_add_courses`. Nếu còn danh sách cần thêm → gọi `add_courses_to_learning_path(path_id, user_id, course_ids=...)`. Nếu tất cả đều trùng → thông báo không thêm gì.
+                2) Nếu người dùng yêu cầu "thêm 1 môn N4/N3" hoặc không chỉ định mã cụ thể: ưu tiên dùng `add_next_course_for_level(path_id, user_id, level)` (fallback manifest) để thêm môn tiếp theo theo level (VD: N4 → JPD216 rồi JPD226; N3 → từ JPD316...). Nếu thất bại vì DB thiếu course → thông báo tên mã và đề xuất bổ sung dữ liệu.
+                3) Sau khi thêm thành công → `get_learning_path_details` và trả `Final Answer` tóm tắt lộ trình mới.
+
+        - XÓA MÔN HỌC:
+            - Nếu `context.confirm_delete_courses == "yes"` và có `context.pending_delete_courses`: xóa các mã này khỏi lộ trình hiện tại (bằng tool/SQL), rồi trả chi tiết lộ trình sau khi xóa.
+
+        - ĐỔI THỨ TỰ:
+            - Nếu `context.confirm_reorder_courses == "yes"`:
+                1) Nếu có `context.pending_reorder_swap` gồm đúng 2 mã → xây `ordered_course_ids` mới bằng việc lấy danh sách hiện tại và hoán chỗ cặp đó, rồi gọi `reorder_courses_in_learning_path`.
+                2) Nếu có `context.pending_reorder_courses` là danh sách thứ tự mong muốn đầy đủ → dùng trực tiếp danh sách này để gọi `reorder_courses_in_learning_path`.
+                3) Nếu có `context.pending_reorder_move_from` và `context.pending_reorder_move_to` (đổi vị trí theo chỉ số, ví dụ "môn thứ 5 lên vị trí thứ 3") → lấy danh sách hiện tại theo thứ tự, di chuyển phần tử ở chỉ số `from` sang chỉ số `to`, rồi gọi `reorder_courses_in_learning_path`.
+                4) Sau đó lấy lại chi tiết và trả `Final Answer` với thứ tự mới.
+
+        - ĐẶT LỘ TRÌNH CHÍNH / LƯU TRỴ LỘ TRÌNH:
+            - Nếu `context.confirm_set_primary_path == "yes"`:
+                • Nếu `context.pending_primary_path_id == "current"` → lấy lộ trình đang `STUDYING` nếu đã có; nếu chưa có, chọn lộ trình phù hợp nhất theo hội thoại và gọi `set_primary_learning_path` với `path_id` đó.
+                • Nếu `context.pending_primary_path_id` là số → gọi `set_primary_learning_path(path_id=...)`.
+            - Nếu `context.confirm_delete_learning_path == "yes"`:
+                • Nếu `context.pending_delete_learning_path == "current"` → tìm lộ trình đang `STUDYING` và gọi `archive_learning_path`.
+                • Nếu có `context.pending_delete_learning_path_ids` → lặp từng id và gọi `archive_learning_path`.
     """
 
     prompt = ChatPromptTemplate.from_messages([

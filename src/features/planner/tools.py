@@ -184,13 +184,15 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 return {"error": "user_id không hợp lệ."}
             if not course_ids:
                 return {"error": "Danh sách khóa học trống. Hãy gọi tool lấy sequence khóa học trước khi tạo lộ trình."}
-            # Chỉ giữ các course tồn tại trong DB
+            # Chỉ giữ các course tồn tại trong DB, nhưng PHẢI giữ NGUYÊN THỨ TỰ gốc của course_ids
             cur.execute('SELECT id FROM course WHERE id = ANY(%s);', (course_ids,))
-            existing_ids = [r[0] for r in cur.fetchall()]
-            skipped_ids = [cid for cid in course_ids if cid not in set(existing_ids)]
-            if not existing_ids:
+            _rows = [r[0] for r in cur.fetchall()]
+            existing_set = set(_rows)
+            ordered_ids = [cid for cid in course_ids if cid in existing_set]
+            skipped_ids = [cid for cid in course_ids if cid not in existing_set]
+            if not ordered_ids:
                 return {"error": "Không có mã môn hợp lệ trong cơ sở dữ liệu.", "skipped_courses": skipped_ids}
-            total_hours = _sum_course_duration(cur, existing_ids)
+            total_hours = _sum_course_duration(cur, ordered_ids)
             cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
             cur.execute(
                 '''INSERT INTO learning_path (user_id, title, description, target_level, primary_goal, focus_skill, status, created_at, last_updated_at, duration)
@@ -198,11 +200,11 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 (user_id_int, title, description, target_level, primary_goal, focus_skill, 'STUDYING', total_hours)
             )
             path_id = cur.fetchone()[0]
-            if existing_ids:
-                values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(existing_ids)]
+            if ordered_ids:
+                values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(ordered_ids)]
                 execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
             conn.commit()
-            return {"success": True, "path_id": path_id, "used_course_ids": existing_ids, "skipped_courses": skipped_ids}
+            return {"success": True, "path_id": path_id, "used_course_ids": ordered_ids, "skipped_courses": skipped_ids}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
@@ -457,6 +459,49 @@ def add_next_course_for_level(path_id: int, user_id: Union[str, int], level: str
         return {"error": str(e)}
     finally:
         conn.close()
+
+@tool
+def check_course_availability_for_range(start_level: str, end_level: str) -> dict:
+    """
+    Kiểm tra danh sách môn theo manifest từ start_level -> end_level (inclusive),
+    trả về các môn có trong DB và các môn còn thiếu.
+    Dùng để cảnh báo khi hệ thống chưa cập nhật đủ môn ở level cao (ví dụ N2).
+    """
+    try:
+        start = start_level.upper()
+        end = end_level.upper()
+        seq = course_sequence_between(start, end) or []
+        if not seq:
+            return {"error": "Không tìm thấy danh sách môn theo manifest."}
+        # Xây map thiếu theo từng level trong khoảng
+        order = ["N5","N4","N3","N2","N1"]
+        try:
+            i_start = order.index(start)
+            i_end = order.index(end)
+        except ValueError:
+            i_start, i_end = 0, 0
+        levels_in_range = order[min(i_start, i_end):max(i_start, i_end)+1]
+        level_to_courses = {lv: set(courses_by_level(lv) or []) for lv in levels_in_range}
+        # Kiểm tra tồn tại trong DB
+        conn = get_db_connection()
+        if not conn:
+            return {"error": "Không thể kết nối DB"}
+        with conn.cursor() as cur:
+            cur.execute('SELECT id FROM course WHERE id = ANY(%s);', (seq,))
+            existing = {r[0] for r in cur.fetchall()}
+        missing = [cid for cid in seq if cid not in existing]
+        missing_by_level = {}
+        for lv, lv_courses in level_to_courses.items():
+            missing_by_level[lv] = [cid for cid in lv_courses if cid in set(missing)]
+        return {
+            "success": True,
+            "wanted_courses": seq,
+            "available_courses": [cid for cid in seq if cid in existing],
+            "missing_courses": missing,
+            "missing_by_level": {lv: len(ids) for lv, ids in missing_by_level.items()}
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @tool
 def calculate_time_constraints(deadline_info: str) -> dict:

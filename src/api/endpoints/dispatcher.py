@@ -14,7 +14,6 @@ from typing import Optional
 
 router = APIRouter()
 
-# === Constants ===
 DEFAULT_QNA_LINK = "/chatbot"
 
 qna_agent_executor = initialize_qna_agent()

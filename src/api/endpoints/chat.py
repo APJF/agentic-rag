@@ -34,7 +34,6 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     """
     session_type = request.session_type.upper()
 
-    # 1. Tự động tạo tên session
     if session_type == "GENERAL":
         session_name = await generate_session_name(request.first_message)
     elif session_type == "PLANNER":
@@ -42,7 +41,6 @@ async def initiate_and_invoke(request: ChatInitiateRequest = Body(...)):
     else:
         session_name = f"Phiên {session_type}"
 
-    # 2. Tạo session mới trong DB
     session_id = create_new_session(
         user_id=request.user_id,
         session_name=session_name,
