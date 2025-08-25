@@ -12,6 +12,8 @@ from .tools import (
     reorder_courses_in_learning_path,
     create_learning_path,
     set_primary_learning_path,
+    promote_latest_pending_learning_path,
+    set_primary_learning_path_by_title,
     suggest_next_course_for_level,
     add_next_course_for_level,
     update_user_level,
@@ -48,6 +50,10 @@ def initialize_planning_agent():
         reorder_courses_in_learning_path,
         create_learning_path,
         set_primary_learning_path,
+        promote_latest_pending_learning_path,
+        set_primary_learning_path_by_title,
+        promote_latest_pending_learning_path,
+        set_primary_learning_path_by_title,
         suggest_next_course_for_level,
         add_next_course_for_level,
         update_user_level,
@@ -112,6 +118,7 @@ QUAN TRỌNG:
     **2. LẤY DANH SÁCH MÔN HỌC:**
         - ƯU TIÊN dùng `get_course_sequence_between_levels(start_level, end_level)` theo `current_level`→`target_level`, hoặc `get_course_sequence_for_improvement(current_level)` khi mục tiêu là cải thiện kỹ năng.
         - Nếu cần mở rộng/điều chỉnh theo focus, có thể dùng thêm `find_relevant_courses`.
+        - QUY TẮC THỨ TỰ LEVEL: Khi sắp xếp/ghép danh sách, phải đảm bảo thứ tự level tăng dần (N5→N4→N3→N2→N1). Không để môn N1 xuất hiện sau cùng nếu mục tiêu chỉ tới N2; nếu phát hiện lệch, sắp xếp lại theo level.
     **3. QUYẾT ĐỊNH SỐ LƯỢỢNG KHÓA HỌC (DỰA TRÊN THỜI GIAN) & KHẢ DỤNG DỮ LIỆU:**
         - Nếu người dùng nói "thi JLPT" mà không ghi tháng, tự suy ra kỳ gần nhất (7 hoặc 12) theo `get_now_utc7()`; nếu hiện tại đã qua kỳ gần nhất, lấy kỳ tiếp theo.
         - Dùng tool `calculate_time_constraints` nếu có `deadline_info`.

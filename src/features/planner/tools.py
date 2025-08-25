@@ -65,6 +65,38 @@ def _compute_level_from_score(level_main: str, score_percent: float) -> str:
         tier = "H"
     return f"{level_main}_{tier}"
 
+# === Level helpers ===
+_LEVEL_ORDER = ["N5", "N4", "N3", "N2", "N1"]
+_DIGIT_TO_LEVEL = {
+    "1": "N5",
+    "2": "N4",
+    "3": "N3",
+    "4": "N2",
+    "5": "N1",
+}
+
+def _level_from_course_id(course_id: str) -> Optional[str]:
+    """Suy ra level từ mã môn. Ví dụ: JPD113 -> N5, JPD216 -> N4, JPD316 -> N3.
+    Quy tắc: chữ số đầu tiên trong cụm số sau prefix JPD: 1->N5, 2->N4, 3->N3, 4->N2, 5->N1.
+    """
+    if not course_id:
+        return None
+    try:
+        import re as _re
+        m = _re.search(r"[A-Za-z]+(\d{3,})", str(course_id))
+        if not m:
+            return None
+        first_digit = m.group(1)[0]
+        return _DIGIT_TO_LEVEL.get(first_digit)
+    except Exception:
+        return None
+
+def _level_index(level: Optional[str]) -> int:
+    try:
+        return _LEVEL_ORDER.index(level) if level in _LEVEL_ORDER else len(_LEVEL_ORDER)
+    except Exception:
+        return len(_LEVEL_ORDER)
+
 class CreateLearningPathInput(BaseModel):
     user_id: Union[str, int] = Field(...)
     title: str = Field(...)
@@ -129,6 +161,64 @@ def set_primary_learning_path(path_id: int, user_id: Union[str, int]) -> dict:
         conn.close()
 
 @tool
+def promote_latest_pending_learning_path(user_id: Union[str, int]) -> dict:
+    """
+    Đặt lộ trình PENDING mới nhất của user làm STUDYING.
+    Tự động hạ lộ trình STUDYING hiện tại (nếu có) xuống PENDING.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "Không thể kết nối database."}
+    try:
+        with conn.cursor() as cur:
+            user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+            if user_id_int is None:
+                return {"error": "user_id không hợp lệ."}
+            cur.execute('SELECT id FROM learning_path WHERE user_id = %s AND status = %s ORDER BY last_updated_at DESC LIMIT 1;', (user_id_int, 'PENDING'))
+            row = cur.fetchone()
+            if not row:
+                return {"error": "Không có lộ trình PENDING để đặt làm chính."}
+            path_id = row[0]
+            # demote studying
+            cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
+            # promote selected
+            cur.execute('UPDATE learning_path SET status = %s, last_updated_at = NOW() WHERE id = %s AND user_id = %s;', ('STUDYING', path_id, user_id_int))
+            conn.commit()
+            return {"success": True, "path_id": path_id}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+@tool
+def set_primary_learning_path_by_title(title: str, user_id: Union[str, int]) -> dict:
+    """
+    Đặt lộ trình có tiêu đề khớp chính xác làm STUDYING cho user.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "Không thể kết nối database."}
+    try:
+        with conn.cursor() as cur:
+            user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+            if user_id_int is None:
+                return {"error": "user_id không hợp lệ."}
+            cur.execute('SELECT id FROM learning_path WHERE user_id = %s AND title = %s LIMIT 1;', (user_id_int, title))
+            row = cur.fetchone()
+            if not row:
+                return {"error": "Không tìm thấy lộ trình theo tiêu đề."}
+            path_id = row[0]
+            cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
+            cur.execute('UPDATE learning_path SET status = %s, last_updated_at = NOW() WHERE id = %s AND user_id = %s;', ('STUDYING', path_id, user_id_int))
+            conn.commit()
+            return {"success": True, "path_id": path_id}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()
+@tool
 def list_learning_paths(user_id: Union[str, int]) -> dict:
     """
     Lấy danh sách lộ trình học (active và archived) của user.
@@ -192,6 +282,11 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
             skipped_ids = [cid for cid in course_ids if cid not in existing_set]
             if not ordered_ids:
                 return {"error": "Không có mã môn hợp lệ trong cơ sở dữ liệu.", "skipped_courses": skipped_ids}
+            # Re-validate ordering by level: không để môn level cao xuất hiện trước level thấp nếu target là tăng dần
+            try:
+                ordered_ids = sorted(ordered_ids, key=lambda cid: (_level_index(_level_from_course_id(cid)), ordered_ids.index(cid)))
+            except Exception:
+                pass
             total_hours = _sum_course_duration(cur, ordered_ids)
             cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
             cur.execute(
@@ -296,15 +391,23 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
             if row[0] not in ('STUDYING',):
                 return {"error": "Chỉ có thể thêm khóa học vào lộ trình đang hoạt động."}
+            # Loại bỏ mã đã có và đảm bảo thứ tự level hợp lý khi chèn
+            cur.execute('SELECT course_id FROM course_learning_path WHERE learning_path_id = %s ORDER BY course_order_number ASC;', (path_id,))
+            existing_ids = [r[0] for r in cur.fetchall()]
+            filtered = [cid for cid in course_ids if cid not in set(existing_ids)]
+            try:
+                filtered = sorted(filtered, key=lambda cid: (_level_index(_level_from_course_id(cid)), course_ids.index(cid)))
+            except Exception:
+                pass
             # Lấy order number lớn nhất hiện có
             cur.execute('SELECT COALESCE(MAX(course_order_number), 0) FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
             last_order = cur.fetchone()[0]
-            # Chèn các khóa học mới
-            values = [(course_id, path_id, last_order + i + 1) for i, course_id in enumerate(course_ids)]
+            # Chèn các khóa học mới theo thứ tự hợp lệ
+            values = [(course_id, path_id, last_order + i + 1) for i, course_id in enumerate(filtered)]
             execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
             cur.execute('UPDATE learning_path SET last_updated_at = NOW() WHERE id = %s;', (path_id,))
             conn.commit()
-            return {"success": True}
+            return {"success": True, "added_courses": filtered}
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
