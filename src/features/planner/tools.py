@@ -303,6 +303,24 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
             except Exception:
                 pass
             total_hours = _sum_course_duration(cur, ordered_ids)
+
+            # Build availability warning if target_level > max available in DB
+            try:
+                target_main = (_level_from_course_id(f"JPD5xx") and target_level) or target_level  # keep original target parse
+                # compute max level present in ordered_ids
+                levels_present = [_level_from_course_id(cid) for cid in ordered_ids]
+                levels_present = [lv for lv in levels_present if lv in _LEVEL_ORDER]
+                max_level_present = None
+                if levels_present:
+                    max_level_present = max(levels_present, key=lambda lv: _level_index(lv))
+                warn_msg = None
+                if max_level_present and target_level and _level_index(max_level_present) < _level_index((_level_from_course_id(target_level) or target_level).split('_')[0]):
+                    warn_msg = (
+                        f"Cảnh báo: Dữ liệu hiện tại chỉ có tới {max_level_present}. Lộ trình sẽ được tạo đến hết {max_level_present}. "
+                        "Khi hệ thống cập nhật thêm môn ở level cao hơn, bạn có thể mở rộng lộ trình."
+                    )
+            except Exception:
+                warn_msg = None
             cur.execute('UPDATE learning_path SET status = %s WHERE user_id = %s AND status = %s;', ('PENDING', user_id_int, 'STUDYING'))
             cur.execute(
                 '''INSERT INTO learning_path (user_id, title, description, target_level, primary_goal, focus_skill, status, created_at, last_updated_at, duration)
@@ -314,7 +332,10 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
                 values = [(course_id, path_id, idx+1) for idx, course_id in enumerate(ordered_ids)]
                 execute_values(cur, 'INSERT INTO course_learning_path (course_id, learning_path_id, course_order_number) VALUES %s;', values)
             conn.commit()
-            return {"success": True, "path_id": path_id, "used_course_ids": ordered_ids, "skipped_courses": skipped_ids}
+            result = {"success": True, "path_id": path_id, "used_course_ids": ordered_ids, "skipped_courses": skipped_ids}
+            if warn_msg:
+                result["warning"] = warn_msg
+            return result
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}

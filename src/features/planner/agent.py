@@ -138,7 +138,7 @@ QUAN TRỌNG:
             6. Trước khi tạo lộ trình theo khoảng level (ví dụ N3→N2), dùng `check_course_availability_for_range(start_level, end_level)` để kiểm tra khóa học:
                - Nếu thiếu môn ở level cao hơn phạm vi dữ liệu hiện có (ví dụ chỉ có tới N3) → `Final Answer`: "Hệ thống chưa cập nhật đủ môn ở các level cao hơn, nên hiện chỉ tạo được lộ trình đến hết level khả dụng (ví dụ N3). Khi hệ thống cập nhật thêm, bạn có thể tiếp tục mở rộng lộ trình."
                - Nếu đủ → tiếp tục tạo đầy đủ.
-            7. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu.
+            7. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu. Nếu tool trả về `warning`, PHẢI chèn cảnh báo này vào Final Answer (ví dụ: dữ liệu chỉ tới N3, sẽ mở rộng khi cập nhật).
     **5. TRÌNH BÀY:**
         - `Final Answer`: Trình bày chi tiết lộ trình vừa tạo và thông báo rằng nó đã được lưu và kích hoạt.
 
