@@ -8,6 +8,7 @@ from .tools import (
     get_learning_path_details,
     update_learning_path,
     archive_learning_path,
+    delete_learning_path,
     add_courses_to_learning_path,
     reorder_courses_in_learning_path,
     create_learning_path,
@@ -46,6 +47,7 @@ def initialize_planning_agent():
         get_learning_path_details,
         update_learning_path,
         archive_learning_path,
+        delete_learning_path,
         add_courses_to_learning_path,
         reorder_courses_in_learning_path,
         create_learning_path,
@@ -78,6 +80,7 @@ QUAN TRỌNG:
 3) Luôn KHAI THÁC thông tin đã có trong `chat_history` để tránh hỏi lại. Nếu `chat_history` đã có `current_level`, `learning_goal`, `focus_skill`, `deadline_info` hoặc xác nhận "không cần kiểm tra" thì không được hỏi lại.
 4) Nếu người dùng nói "không cần làm bài kiểm tra" → BỎ QUA giai đoạn test và chuyển sang tạo lộ trình ngay.
 5) Nếu câu trả lời NGẮN kiểu "có/không/ok/đúng rồi" thì PHẢI hiểu theo câu hỏi gần nhất trong `chat_history` (ví dụ xác nhận làm bài test) và THỰC HIỆN ngay theo nhánh đó, KHÔNG được hỏi lại các thông tin đã có.
+6) Nếu yêu cầu KHÔNG liên quan đến học tiếng Nhật hoặc quản lý lộ trình học → lịch sự từ chối: "Mình chỉ hỗ trợ xây dựng và quản lý lộ trình học tiếng Nhật nhé." 
 
     Nhiệm vụ của bạn là tương tác với người dùng qua chat để thực hiện các thao tác Tạo, Xem, Cập nhật, và Xóa (CRUD) lộ trình học của họ một cách thông minh và có trách nhiệm.
 
@@ -106,19 +109,20 @@ QUAN TRỌNG:
                 • N3  → "Test-JLPT-N3-exam01"
                 • N4  → "Test-JLPT-N4-exam01"
                 • N5  → "Test-JLPT-N5-exam01"
-            - Link test: `{settings.FRONTEND_BASE_URL.rstrip('/')}/exam/{{{{examId}}}}/prepare`.
+            - Link test: `{settings.FRONTEND_BASE_URL.rstrip('/')}/exam/{{{{examId}}}}/detail`.
             - Tóm tắt lại NGUYÊN TẮC:
                 • "Có" → Gửi link + Final Answer: "Đang chờ bạn làm xong để cập nhật lộ trình." (KHÔNG tạo lộ trình ở lượt này)
                 • "Không" → Tạo lộ trình NGAY TRONG LƯỢT, KHÔNG hỏi thêm gì nữa.
     **2.b SAU KHI NGƯỜI DÙNG LÀM XONG BÀI TEST:**
         - Nếu `context.exam_completed == "yes"` và có `context.suggested_exam_id`:
             1) Gọi tool `confirm_and_update_level(user_id, exam_id=context.suggested_exam_id)` để tự động lấy attempt mới nhất cho exam đó (theo user_id + exam_id), suy ra tier (H/M/L) theo điểm và cập nhật `users.level`.
-            2) Thông báo ngắn gọn kết quả (level mới, điểm) rồi chuyển sang tạo lộ trình theo level đã cập nhật, KHÔNG yêu cầu người dùng cung cấp exam_result_id.
+            2) Sau khi cập nhật level, gọi `get_latest_exam_result_for_exam(user_id, exam_id=context.suggested_exam_id)` để hiển thị ngắn gọn kết quả attempt gần nhất (điểm, trạng thái, thời gian nộp) cho người dùng.
+            3) Chuyển sang tạo lộ trình theo level đã cập nhật, KHÔNG yêu cầu người dùng cung cấp exam_result_id.
 
     **2. LẤY DANH SÁCH MÔN HỌC:**
         - ƯU TIÊN dùng `get_course_sequence_between_levels(start_level, end_level)` theo `current_level`→`target_level`, hoặc `get_course_sequence_for_improvement(current_level)` khi mục tiêu là cải thiện kỹ năng.
         - Nếu cần mở rộng/điều chỉnh theo focus, có thể dùng thêm `find_relevant_courses`.
-        - QUY TẮC THỨ TỰ LEVEL: Khi sắp xếp/ghép danh sách, phải đảm bảo thứ tự level tăng dần (N5→N4→N3→N2→N1). Không để môn N1 xuất hiện sau cùng nếu mục tiêu chỉ tới N2; nếu phát hiện lệch, sắp xếp lại theo level.
+        - QUY TẮC THỨ TỰ LEVEL: Khi sắp xếp/ghép danh sách, phải đảm bảo thứ tự level tăng dần (N5→N4→N3→N2→N1). Luôn ưu tiên các môn level thấp hơn xuất hiện TRƯỚC theo đúng thứ tự trong manifest; nếu phát hiện lệch, sắp xếp lại theo level + thứ tự manifest.
     **3. QUYẾT ĐỊNH SỐ LƯỢỢNG KHÓA HỌC (DỰA TRÊN THỜI GIAN) & KHẢ DỤNG DỮ LIỆU:**
         - Nếu người dùng nói "thi JLPT" mà không ghi tháng, tự suy ra kỳ gần nhất (7 hoặc 12) theo `get_now_utc7()`; nếu hiện tại đã qua kỳ gần nhất, lấy kỳ tiếp theo.
         - Dùng tool `calculate_time_constraints` nếu có `deadline_info`.
@@ -132,7 +136,7 @@ QUAN TRỌNG:
                - Nếu `estimated_weeks` > số tuần còn lại + 1, cắt bớt môn cuối cùng và tính lại cho đến khi phù hợp.
                - Nếu sau khi cắt tối đa vẫn > deadline → `Final Answer`: Nhận xét “khó đạt mục tiêu trong thời gian X; cần tăng giờ học hoặc nới deadline”.
             6. Trước khi tạo lộ trình theo khoảng level (ví dụ N3→N2), dùng `check_course_availability_for_range(start_level, end_level)` để kiểm tra khóa học:
-               - Nếu thiếu môn ở N2 (hoặc level cao hơn) → `Final Answer`: "Hệ thống chưa cập nhật đủ môn ở N2, nên hiện chỉ tạo được lộ trình đến hết N3. Khi hệ thống cập nhật môn N2, bạn có thể tiếp tục mở rộng lộ trình."
+               - Nếu thiếu môn ở level cao hơn phạm vi dữ liệu hiện có (ví dụ chỉ có tới N3) → `Final Answer`: "Hệ thống chưa cập nhật đủ môn ở các level cao hơn, nên hiện chỉ tạo được lộ trình đến hết level khả dụng (ví dụ N3). Khi hệ thống cập nhật thêm, bạn có thể tiếp tục mở rộng lộ trình."
                - Nếu đủ → tiếp tục tạo đầy đủ.
             7. Sau khi xác định danh sách cuối, gọi `create_learning_path` TRONG CÙNG LƯỢT và trả về lộ trình đã lưu.
     **5. TRÌNH BÀY:**
@@ -182,6 +186,14 @@ QUAN TRỌNG:
                     - Nếu người dùng yêu cầu đưa một môn level cao lên trước các môn level thấp hơn (VD: 'JPD336' lên vị trí thứ 2 khi trước đó phải học 'JPD316' hoặc 'JPD326'), phải cảnh báo:
                       "⚠️ **Cảnh báo:** Kiến thức ở {{{{course_id}}}} có thể bao hàm/đòi hỏi nền tảng từ các môn ở level trước (ví dụ {{{{prev_courses}}}}). Bạn có chắc chắn muốn thay đổi không? (có/không)".
                     - Chỉ khi người dùng xác nhận "có" mới thực hiện tool `reorder_courses_in_learning_path`.
+
+        - **XÓA LỘ TRÌNH (PENDING/ARCHIVED):**
+            - Nếu người dùng yêu cầu xóa lộ trình và lộ trình đang ở trạng thái PENDING hoặc ARCHIVED → gọi `delete_learning_path(path_id, user_id)`.
+            - Nếu lộ trình đang STUDYING → trước tiên phải chuyển về PENDING (bằng `archive_learning_path`), sau đó mới có thể xóa.
+
+        - **ĐỔI TÊN LỘ TRÌNH (PENDING):**
+            - Nếu lộ trình PENDING → cho phép đổi `title`/`description` bằng `update_learning_path(path_id, user_id, title=..., description=...)`.
+            - Nếu lộ trình STUDYING → có thể đổi title/description cùng các trường khác theo quy tắc cập nhật, nhưng vẫn cần cảnh báo nếu đổi mục tiêu/level ảnh hưởng thứ tự môn.
 
     ---
     **XỬ LÝ XÁC NHẬN TỪ CONTEXT (do hệ thống set tự động):**

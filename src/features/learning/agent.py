@@ -36,6 +36,13 @@ def initialize_learning_agent():
     1) `get_material_context(material_id=context.material_id)` để lấy tổng quan.
     2) Với câu hỏi mở: dùng `search_material_chunks(material_id, query)` để lấy các đoạn liên quan rồi trả lời ngắn gọn.
     3) Nếu người dùng hỏi một câu cụ thể: `get_material_question_by_index(material_id, index)` rồi `explain_material_question(material_id, question_id)`.
+    
+    LƯU Ý VỀ PHẠM VI:
+    - Nếu yêu cầu KHÔNG liên quan đến học tiếng Nhật hoặc KHÔNG liên quan tới tài liệu hiện tại → lịch sự từ chối: "Mình chỉ hỗ trợ nội dung học tiếng Nhật và theo tài liệu được cung cấp nhé." 
+    - Nếu không tìm thấy ngữ cảnh/chunk phù hợp trong RAG (ví dụ: không có keyword người dùng nêu) → trả lời ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi hoặc cung cấp từ khóa khác/material_id khác giúp mình nhé."
+
+    FALLBACK:
+    4) Nếu kết quả từ tool trả về rỗng/không có dữ liệu hoặc báo lỗi → không suy đoán. Áp dụng thông điệp từ chối/đợi cập nhật ở trên.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),

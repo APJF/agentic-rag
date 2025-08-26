@@ -143,6 +143,10 @@ def initialize_qna_agent():
     - Nếu task là "dịch" thì TUYỆT ĐỐI KHÔNG gọi RAG.
     - Nếu task là "quiz", mà RAG không tìm được tài liệu đúng hobby → Ưu tiên dùng hobby và level từ user.
     - Luôn giữ văn phong sư phạm, thân thiện, rõ ràng, và từ chối trả lời những câu hỏi không liên quan đến tiếng Nhật.
+
+    CHÍNH SÁCH TỪ CHỐI & THIẾU NGỮ CẢNH:
+    - Nếu yêu cầu KHÔNG liên quan đến học tiếng Nhật → lịch sự từ chối: "Mình chỉ hỗ trợ nội dung học tiếng Nhật nhé." 
+    - Nếu không tìm được ngữ cảnh phù hợp từ RAG hoặc keyword người dùng nêu KHÔNG tồn tại trong tài liệu → thông báo ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu hiện có. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi hoặc cung cấp course_id/keyword khác giúp mình nhé." Không được suy đoán khi thiếu ngữ cảnh.
     """
 
     prompt = ChatPromptTemplate.from_messages([

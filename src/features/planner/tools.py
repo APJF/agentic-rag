@@ -282,9 +282,24 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
             skipped_ids = [cid for cid in course_ids if cid not in existing_set]
             if not ordered_ids:
                 return {"error": "Không có mã môn hợp lệ trong cơ sở dữ liệu.", "skipped_courses": skipped_ids}
-            # Re-validate ordering by level: không để môn level cao xuất hiện trước level thấp nếu target là tăng dần
+            # Re-validate ordering by level using manifest order as primary key
             try:
-                ordered_ids = sorted(ordered_ids, key=lambda cid: (_level_index(_level_from_course_id(cid)), ordered_ids.index(cid)))
+                # Build manifest position map for deterministic in-level ordering
+                manifest_pos: dict = {}
+                for lv in ["N5","N4","N3","N2","N1"]:
+                    seq = courses_by_level(lv) or []
+                    for idx, cid in enumerate(seq):
+                        # Smaller index means earlier in level
+                        if cid not in manifest_pos:
+                            manifest_pos[cid] = idx
+                input_index = {cid: i for i, cid in enumerate(ordered_ids)}
+                def _sort_key(cid: str):
+                    return (
+                        _level_index(_level_from_course_id(cid)),
+                        manifest_pos.get(cid, 10_000),
+                        input_index.get(cid, 10_000)
+                    )
+                ordered_ids = sorted(ordered_ids, key=_sort_key)
             except Exception:
                 pass
             total_hours = _sum_course_duration(cur, ordered_ids)
@@ -309,7 +324,12 @@ def create_learning_path(user_id: str, title: str, description: str, target_leve
 @tool(args_schema=UpdateLearningPathInput)
 def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None, description: Optional[str] = None, target_level: Optional[str] = None, primary_goal: Optional[str] = None, focus_skill: Optional[str] = None) -> dict:
     """
-    Cập nhật thông tin lộ trình học (chỉ khi active và user sở hữu).
+    Cập nhật thông tin lộ trình học (user sở hữu).
+
+    Quy tắc:
+    - Nếu lộ trình đang hoạt động (STUDYING): cho phép cập nhật các trường: title, description, target_level, primary_goal, focus_skill.
+    - Nếu lộ trình ở trạng thái PENDING: CHỈ cho phép đổi tên (title) và mô tả (description). Các trường khác sẽ bị từ chối.
+    - Không hỗ trợ cập nhật khi trạng thái khác (ví dụ ARCHIVED).
     """
     conn = get_db_connection()
     if not conn:
@@ -323,15 +343,24 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
             row = cur.fetchone()
             if not row:
                 return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền cập nhật."}
-            if row[0] != 'STUDYING':
-                return {"error": "Chỉ có thể cập nhật lộ trình đang hoạt động (STUDYING)."}
+            status = row[0]
             fields = []
             params = []
-            if title: fields.append('title = %s'); params.append(title)
-            if description: fields.append('description = %s'); params.append(description)
-            if target_level: fields.append('target_level = %s'); params.append(target_level)
-            if primary_goal: fields.append('primary_goal = %s'); params.append(primary_goal)
-            if focus_skill: fields.append('focus_skill = %s'); params.append(focus_skill)
+            if status == 'STUDYING':
+                if title: fields.append('title = %s'); params.append(title)
+                if description: fields.append('description = %s'); params.append(description)
+                if target_level: fields.append('target_level = %s'); params.append(target_level)
+                if primary_goal: fields.append('primary_goal = %s'); params.append(primary_goal)
+                if focus_skill: fields.append('focus_skill = %s'); params.append(focus_skill)
+            elif status == 'PENDING':
+                # Chỉ cho phép đổi title/description khi PENDING
+                if target_level or primary_goal or focus_skill:
+                    return {"error": "Lộ trình PENDING chỉ cho phép đổi tên và mô tả."}
+                if title: fields.append('title = %s'); params.append(title)
+                if description: fields.append('description = %s'); params.append(description)
+            else:
+                return {"error": "Không hỗ trợ cập nhật cho trạng thái hiện tại của lộ trình."}
+
             if not fields:
                 return {"error": "Không có trường nào để cập nhật."}
             params.append(path_id)
@@ -343,6 +372,40 @@ def update_learning_path(path_id: int, user_id: str, title: Optional[str] = None
         return {"error": str(e)}
     finally:
             conn.close()
+
+@tool
+def delete_learning_path(path_id: int, user_id: Union[str, int]) -> dict:
+    """
+    Xóa vĩnh viễn một lộ trình học thuộc về user khi trạng thái là PENDING hoặc ARCHIVED.
+    - Không cho phép xóa lộ trình đang hoạt động (STUDYING). Hãy chuyển sang PENDING trước nếu cần.
+    - Tự động xóa các bản ghi trong `course_learning_path` liên quan.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return {"error": "Không thể kết nối database."}
+    try:
+        with conn.cursor() as cur:
+            user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
+            if user_id_int is None:
+                return {"error": "user_id không hợp lệ."}
+            cur.execute('SELECT status FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id_int))
+            row = cur.fetchone()
+            if not row:
+                return {"error": "Không tìm thấy lộ trình hoặc bạn không có quyền."}
+            status = row[0]
+            if status == 'STUDYING':
+                return {"error": "Không thể xóa lộ trình đang hoạt động. Hãy chuyển về PENDING trước."}
+            # Xóa liên kết khóa học trước
+            cur.execute('DELETE FROM course_learning_path WHERE learning_path_id = %s;', (path_id,))
+            # Xóa lộ trình
+            cur.execute('DELETE FROM learning_path WHERE id = %s AND user_id = %s;', (path_id, user_id_int))
+            conn.commit()
+            return {"success": True}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()
 
 @tool
 def archive_learning_path(path_id: int, user_id: str) -> dict:
@@ -396,7 +459,20 @@ def add_courses_to_learning_path(path_id: int, user_id: str, course_ids: List[st
             existing_ids = [r[0] for r in cur.fetchall()]
             filtered = [cid for cid in course_ids if cid not in set(existing_ids)]
             try:
-                filtered = sorted(filtered, key=lambda cid: (_level_index(_level_from_course_id(cid)), course_ids.index(cid)))
+                manifest_pos: dict = {}
+                for lv in ["N5","N4","N3","N2","N1"]:
+                    seq = courses_by_level(lv) or []
+                    for idx, cid in enumerate(seq):
+                        if cid not in manifest_pos:
+                            manifest_pos[cid] = idx
+                input_index = {cid: i for i, cid in enumerate(course_ids)}
+                def _sort_key(cid: str):
+                    return (
+                        _level_index(_level_from_course_id(cid)),
+                        manifest_pos.get(cid, 10_000),
+                        input_index.get(cid, 10_000)
+                    )
+                filtered = sorted(filtered, key=_sort_key)
             except Exception:
                 pass
             # Lấy order number lớn nhất hiện có
@@ -726,20 +802,48 @@ def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> 
 
 @tool
 def get_latest_exam_result_for_exam(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
-    """Trả về lần làm bài gần nhất của user cho exam_id (ưu tiên submitted trước, sau đó started_at mới nhất)."""
+    """Trả về lần làm bài gần nhất của user cho một kỳ thi.
+
+    - Nhận `exam_id` là mã số kỳ thi hoặc tiêu đề kỳ thi (title). Nếu là title, sẽ join bảng `exam`.
+    - Thứ tự ưu tiên: bản ghi đã nộp (submitted) trước, sau đó theo thời gian gần nhất.
+    """
     user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
     if user_id_int is None:
         return {"error": "user_id không hợp lệ"}
-    rows = execute_sql_query(
-        """
-        SELECT id, score, status, exam_id, started_at, submitted_at
-        FROM exam_result
-        WHERE user_id = %(user_id)s AND exam_id = %(exam_id)s
-        ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
-        LIMIT 1;
-        """,
-        {"user_id": user_id_int, "exam_id": exam_id}
-    )
+
+    exam_id_num = None
+    exam_title = None
+    try:
+        exam_id_num = int(str(exam_id))
+    except Exception:
+        exam_title = str(exam_id)
+
+    if exam_title is not None:
+        # Lọc theo tiêu đề kỳ thi
+        rows = execute_sql_query(
+            """
+            SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
+            FROM exam_result er
+            JOIN exam e ON e.id = er.exam_id
+            WHERE er.user_id = %(user_id)s AND e.title = %(exam_title)s
+            ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
+            LIMIT 1;
+            """,
+            {"user_id": user_id_int, "exam_title": exam_title}
+        )
+    else:
+        rows = execute_sql_query(
+            """
+            SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
+            FROM exam_result er
+            JOIN exam e ON e.id = er.exam_id
+            WHERE er.user_id = %(user_id)s AND er.exam_id = %(exam_id)s
+            ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
+            LIMIT 1;
+            """,
+            {"user_id": user_id_int, "exam_id": exam_id_num}
+        )
+
     if not rows:
         return {"error": "Chưa có lần làm bài nào."}
     return {"success": True, "data": rows[0]}
