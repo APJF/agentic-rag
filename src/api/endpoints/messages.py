@@ -361,7 +361,7 @@ async def create_message(request: MessageCreateRequest = Body(...)):
             pass
 
     try:
-        m = re.search(r"exam/([^/]+)/preparation", ai_response_text)
+        m = re.search(r"exam/([^/]+)/detail", ai_response_text)
         if m:
             exam_id_captured = m.group(1)
             update_session_context(request.session_id, {"suggested_exam_id": exam_id_captured})
