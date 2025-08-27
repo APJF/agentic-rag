@@ -825,44 +825,42 @@ def calculate_path_duration(course_ids: List[str], hours_per_week: int = 10) -> 
 def get_latest_exam_result_for_exam(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
     """Trả về lần làm bài gần nhất của user cho một kỳ thi.
 
-    - Nhận `exam_id` là mã số kỳ thi hoặc tiêu đề kỳ thi (title). Nếu là title, sẽ join bảng `exam`.
+    - Hỗ trợ các trường hợp:
+      • exam_id là chuỗi mã (ví dụ: "Test-JLPT-N4-exam01") → so khớp trực tiếp exam_result.exam_id
+      • exam_id là số → so khớp exam_result.exam_id::text
+      • exam_id là level (N5/N4/N3/N2/N1) → tìm exam_result.exam_id ILIKE '%N4%'
     - Thứ tự ưu tiên: bản ghi đã nộp (submitted) trước, sau đó theo thời gian gần nhất.
     """
     user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
     if user_id_int is None:
         return {"error": "user_id không hợp lệ"}
 
-    exam_id_num = None
-    exam_title = None
-    try:
-        exam_id_num = int(str(exam_id))
-    except Exception:
-        exam_title = str(exam_id)
-
-    if exam_title is not None:
-        # Lọc theo tiêu đề kỳ thi
+    provided = str(exam_id)
+    level_main = _parse_jlpt_level_from_exam_id(provided)
+    rows = None
+    if level_main in {"N5","N4","N3","N2","N1"}:
+        # Tìm bài làm gần nhất có exam_id chứa level này
         rows = execute_sql_query(
             """
-            SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
-            FROM exam_result er
-            JOIN exam e ON e.id = er.exam_id
-            WHERE er.user_id = %(user_id)s AND e.title = %(exam_title)s
-            ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
+            SELECT id, score, status, exam_id, started_at, submitted_at
+            FROM exam_result
+            WHERE user_id = %(user_id)s AND exam_id ILIKE %(pattern)s
+            ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
             LIMIT 1;
             """,
-            {"user_id": user_id_int, "exam_title": exam_title}
+            {"user_id": user_id_int, "pattern": f"%{level_main}%"}
         )
-    else:
+    if not rows:
+        # So khớp trực tiếp theo exam_id chuỗi
         rows = execute_sql_query(
             """
-            SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
-            FROM exam_result er
-            JOIN exam e ON e.id = er.exam_id
-            WHERE er.user_id = %(user_id)s AND er.exam_id = %(exam_id)s
-            ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
+            SELECT id, score, status, exam_id, started_at, submitted_at
+            FROM exam_result
+            WHERE user_id = %(user_id)s AND (exam_id = %(eid)s OR exam_id::text = %(eid)s)
+            ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
             LIMIT 1;
             """,
-            {"user_id": user_id_int, "exam_id": exam_id_num}
+            {"user_id": user_id_int, "eid": provided}
         )
 
     if not rows:
@@ -875,37 +873,40 @@ class ConfirmLevelInput(BaseModel):
 
 @tool(args_schema=ConfirmLevelInput)
 def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int]) -> dict:
-    """Lấy lần làm bài mới nhất cho exam_id theo user, suy ra tier theo điểm, cập nhật users.level và trả về thông tin."""
+    """Lấy lần làm bài gần nhất theo user và exam_id (mã, level, hoặc chuỗi), suy ra tier từ score, cập nhật users.level và trả về thông tin."""
     user_id_int = _SESSION_USER_ID if _SESSION_USER_ID is not None else _parse_user_id(user_id)
     if user_id_int is None:
         return {"error": "user_id không hợp lệ"}
 
-    exam_id_num = None
-    exam_title = None
-    try:
-        exam_id_num = int(str(exam_id))
-    except Exception:
-        exam_title = str(exam_id)
-
-    rows = execute_sql_query(
-        """
-        SELECT er.id, er.score, er.status, er.exam_id, er.started_at, er.submitted_at, e.title AS exam_title
-        FROM exam_result er
-        JOIN exam e ON e.id = er.exam_id
-        WHERE er.user_id = %(user_id)s
-          AND (
-                (%(exam_id_num)s IS NOT NULL AND er.exam_id = %(exam_id_num)s)
-             OR (%(exam_title)s IS NOT NULL AND e.title = %(exam_title)s)
-          )
-        ORDER BY (er.submitted_at IS NULL), er.submitted_at DESC, er.started_at DESC
-        LIMIT 1;
-        """,
-        {"user_id": user_id_int, "exam_id_num": exam_id_num, "exam_title": exam_title}
-    )
+    provided = str(exam_id)
+    level_main = _parse_jlpt_level_from_exam_id(provided)
+    rows = None
+    if level_main in {"N5","N4","N3","N2","N1"}:
+        rows = execute_sql_query(
+            """
+            SELECT id, score, status, exam_id, started_at, submitted_at
+            FROM exam_result
+            WHERE user_id = %(user_id)s AND exam_id ILIKE %(pattern)s
+            ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
+            LIMIT 1;
+            """,
+            {"user_id": user_id_int, "pattern": f"%{level_main}%"}
+        )
+    if not rows:
+        rows = execute_sql_query(
+            """
+            SELECT id, score, status, exam_id, started_at, submitted_at
+            FROM exam_result
+            WHERE user_id = %(user_id)s AND (exam_id = %(eid)s OR exam_id::text = %(eid)s)
+            ORDER BY (submitted_at IS NULL), submitted_at DESC, started_at DESC
+            LIMIT 1;
+            """,
+            {"user_id": user_id_int, "eid": provided}
+        )
     if not rows:
         return {"error": "Chưa có lần làm bài nào cho exam này."}
     attempt = rows[0]
-    level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_title") or attempt.get("exam_id"))
+    level_main = _parse_jlpt_level_from_exam_id(attempt.get("exam_id"))
     if not level_main:
         return {"error": "Không xác định được level từ exam_id."}
     score = attempt.get("score")
@@ -913,7 +914,27 @@ def confirm_and_update_level(user_id: Union[str, int], exam_id: Union[str, int])
         score_percent = float(score)
     except Exception:
         score_percent = None
-    computed_level = _compute_level_from_score(level_main, score_percent)
+
+    # Special handling: if score < 20%
+    if score_percent is not None and score_percent < 20.0:
+        lower = _jlpt_level_down(level_main)
+        if level_main != "N5":
+            # Do not update users.level; advise taking a lower-level test
+            return {
+                "success": True,
+                "uncertain": True,
+                "exam_level": level_main,
+                "score": score_percent,
+                "recommend_test_level": lower,
+                "message": (
+                    "Kết quả dưới 20%: Chưa xác định chính xác level hiện tại. "
+                    f"Bạn nên làm bài test level {lower} để có đánh giá chính xác hơn."
+                )
+            }
+        else:
+            computed_level = "N5_L"
+    else:
+        computed_level = _compute_level_from_score(level_main, score_percent)
     try:
         conn = get_db_connection()
         if not conn:
