@@ -133,6 +133,46 @@ def search_material_chunks(material_id: str, query: str, top_k: int = 5) -> Dict
             pass
 
 
+class ListeningScriptInput(BaseModel):
+    material_id: str
+
+
+@tool(args_schema=ListeningScriptInput)
+def get_listening_script(material_id: str) -> Dict[str, Any]:
+    """
+    Lấy transcript (JA) và bản dịch (VI) cho tài liệu nghe theo material_id từ DB.
+    Nguồn chính: bảng material (id, file_url, script, translation, type, unit_id).
+    Trả về script_ja/script_vi nếu tìm thấy.
+    """
+    # Query bảng material theo unit_id, id::text hoặc file_url chứa material_id
+    try:
+        rows = execute_sql_query(
+            'SELECT id, unit_id, script, translation, type, file_url FROM material WHERE unit_id = %s OR id::text = %s LIMIT 1;',
+            (material_id, material_id)
+        ) or []
+        if not rows:
+            rows = execute_sql_query(
+                'SELECT id, unit_id, script, translation, type, file_url FROM material WHERE file_url ILIKE %s LIMIT 1;',
+                (f"%{material_id}%",)
+            ) or []
+        if rows:
+            r0 = rows[0]
+            return {
+                "success": True,
+                "script_ja": r0.get('script'),
+                "script_vi": r0.get('translation'),
+                "type": r0.get('type'),
+                "unit_id": r0.get('unit_id'),
+                "material_row_id": r0.get('id'),
+                "file_url": r0.get('file_url'),
+                "source": "material"
+            }
+    except Exception:
+        pass
+
+    return {"error": "Không tìm thấy transcript/bản dịch cho tài liệu nghe trong bảng material."}
+
+
 class MaterialQuestionByIndexInput(BaseModel):
     material_id: str
     index: int = Field(..., description="Số thứ tự câu trong material (1-based)")

@@ -10,6 +10,7 @@ from .tools import (
     explain_material_question,
     get_material_chunks,
     search_material_chunks,
+    get_listening_script,
 )
 from ...core.llm import get_llm
 
@@ -22,6 +23,7 @@ def initialize_learning_agent():
         search_material_chunks,
         get_material_question_by_index,
         explain_material_question,
+        get_listening_script,
     ]
 
     system_prompt = """
@@ -42,7 +44,8 @@ def initialize_learning_agent():
     - Nếu không tìm thấy ngữ cảnh/chunk phù hợp trong RAG (ví dụ: không có keyword người dùng nêu) → trả lời ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi hoặc cung cấp từ khóa khác/material_id khác giúp mình nhé."
 
     FALLBACK:
-    4) Nếu kết quả từ tool trả về rỗng/không có dữ liệu hoặc báo lỗi → không suy đoán. Áp dụng thông điệp từ chối/đợi cập nhật ở trên.
+    4) Nếu kết quả RAG rỗng nhưng skill_type gợi ý là LISTENING hoặc tài liệu là listening: GỌI `get_listening_script(material_id)` để lấy transcript/bản dịch làm ngữ cảnh trả lời (tóm tắt nội dung, trích điểm ngữ pháp xuất hiện nếu có).
+    5) Nếu vẫn không có dữ liệu → không suy đoán. Áp dụng thông điệp từ chối/đợi cập nhật.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
