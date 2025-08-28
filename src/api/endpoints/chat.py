@@ -1,11 +1,11 @@
 # src/api/endpoints/chat.py
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from ..schemas import ChatRequest, ChatResponse, ChatEditRequest, ChatInitiateRequest, ChatInitiateResponse
 from ...features.qna.agent import initialize_qna_agent
 from ...features.planner.agent import initialize_planning_agent
 from ...features.planner.tools import set_session_user_id
-from ...core.session_manager import load_session_data, add_new_messages, rewind_last_turn, create_new_session
+from ...core.session_manager import load_session_data, add_new_messages, rewind_last_turn, create_new_session, find_session
 from ...core.llm import get_llm
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -129,3 +129,26 @@ async def edit_and_resubmit_message(request: ChatEditRequest = Body(...)):
     add_new_messages(request.session_id, [human_msg, ai_msg])
 
     return ChatResponse(session_id=request.session_id, ai_response=ai_response_text)
+
+
+@router.get("/sessions/find")
+async def find_session_by_context(
+    user_id: int = Query(..., description="ID người dùng"),
+    session_type: str = Query("LEARNING", description="Loại phiên: LEARNING/PLANNER/QNA/..."),
+    material_id: str | None = Query(None, description="Material ID để lọc phiên học tài liệu"),
+    exam_result_id: str | None = Query(None, description="Exam result ID để lọc phiên chấm/chữa bài")
+):
+    """
+    Trả về phiên gần nhất ứng với `material_id` hoặc `exam_result_id` (ưu tiên material nếu cả hai được truyền),
+    được giới hạn theo `user_id` và `session_type`.
+    """
+    context: dict = {}
+    if material_id:
+        context["material_id"] = material_id
+    elif exam_result_id:
+        context["exam_result_id"] = exam_result_id
+
+    info = find_session(user_id=user_id, session_type=session_type, context=context or None)
+    if not info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên phù hợp.")
+    return info

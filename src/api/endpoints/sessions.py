@@ -217,6 +217,43 @@ async def list_sessions(user_id: str = Query(..., description="ID người dùng
         })
     return SessionListResponse(user_id=user_id, sessions=sessions_norm)
 
+@router.get("/find")
+async def find_session_by_context(
+    user_id: int = Query(..., description="ID người dùng"),
+    session_type: str = Query("LEARNING", description="Loại phiên: LEARNING/PLANNER/QNA/REVIEWER/SPEAKING"),
+    material_id: str | None = Query(None, description="Material ID để lọc phiên học tài liệu"),
+    exam_result_id: str | None = Query(None, description="Exam result ID để lọc phiên chữa bài")
+):
+    """
+    Trả về phiên gần nhất ứng với `material_id` hoặc `exam_result_id` (ưu tiên material nếu truyền cả hai),
+    được giới hạn theo `user_id` và `session_type`.
+    """
+    context: Dict[str, Any] = {}
+    if material_id:
+        context["material_id"] = material_id
+        info = find_session(user_id=user_id, session_type=session_type, context=context)
+        if not info:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiên phù hợp.")
+        return info
+
+    if exam_result_id is not None:
+        # Thử dạng số (JSONB so khớp kiểu chặt chẽ)
+        info = None
+        try:
+            numeric_id = int(str(exam_result_id))
+            info = find_session(user_id=user_id, session_type=session_type, context={"exam_result_id": numeric_id})
+        except Exception:
+            info = None
+        # Fallback: thử dạng chuỗi nếu DB lưu chuỗi
+        if not info:
+            info = find_session(user_id=user_id, session_type=session_type, context={"exam_result_id": str(exam_result_id)})
+        if not info:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiên phù hợp.")
+        return info
+
+    raise HTTPException(status_code=400, detail="Cần truyền material_id hoặc exam_result_id.")
+
+
 @router.get("/{session_id}", response_model=HistoryResponse)
 async def get_session_detail(session_id: int = Path(...)):
     def _detect_message_time_column(cur) -> Optional[str]:

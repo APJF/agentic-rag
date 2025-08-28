@@ -30,6 +30,7 @@ app.add_middleware(
 )
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Session Management"])
 app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat"], include_in_schema=False)
 app.include_router(planner.router, prefix="/planner", tags=["Learning Path Planner"])
 app.include_router(dispatcher.router, prefix="", tags=["Dispatcher"])
 app.include_router(reviewer.router, prefix="/api/exam", tags=["Exam Overview"])  # new
