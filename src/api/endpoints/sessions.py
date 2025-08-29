@@ -254,7 +254,7 @@ async def find_session_by_context(
     raise HTTPException(status_code=400, detail="Cần truyền material_id hoặc exam_result_id.")
 
 
-@router.get("/{session_id}", response_model=HistoryResponse)
+@router.get("/{session_id:int}", response_model=HistoryResponse)
 async def get_session_detail(session_id: int = Path(...)):
     def _detect_message_time_column(cur) -> Optional[str]:
         cur.execute(
@@ -337,7 +337,7 @@ class SessionUpdateRequest(BaseModel):
     name: Optional[str] = None
     context: Optional[dict] = None
 
-@router.put("/{session_id}", response_model=SessionInfo)
+@router.put("/{session_id:int}", response_model=SessionInfo)
 async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)):
     updated = False
     if request.name:
@@ -354,12 +354,12 @@ async def put_session(session_id: int, request: SessionUpdateRequest = Body(...)
     updated_utc7 = (info["updated_at"] + timedelta(hours=7)) if info.get("updated_at") else None
     return SessionInfo(id=info["id"], session_name=info["name"], type=info.get("type"), created_at=created_utc7, updated_at=updated_utc7)
 
-@router.patch("/{session_id}", response_model=SessionInfo)
+@router.patch("/{session_id:int}", response_model=SessionInfo)
 async def patch_session(session_id: int, request: SessionUpdateRequest = Body(...)):
     return await put_session(session_id, request)
 
 
-@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{session_id:int}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session_endpoint(session_id: int = Path(...)):
     if not delete_session(session_id):
         raise HTTPException(status_code=404, detail="Phiên không tồn tại hoặc đã bị xóa.")

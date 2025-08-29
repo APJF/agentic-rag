@@ -1,8 +1,6 @@
-# src/data_processing/pdf_document_processor.py
 import os
 import re
 import pdfplumber
-import psycopg2
 import json
 from psycopg2.extras import execute_values
 from typing import List, Dict, Any
