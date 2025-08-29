@@ -18,7 +18,7 @@ def initialize_reviewer_agent():
     - Nếu người dùng nói "câu X", mặc định là câu thứ X trong đề của `context` hiện tại. Không hỏi lại các thông tin đã có.
     - Chỉ gửi Final Answer, không in Thought/Action.
     - Nếu yêu cầu KHÔNG liên quan tới chữa bài/tiếng Nhật → lịch sự từ chối: "Mình chỉ hỗ trợ chữa bài kiểm tra tiếng Nhật nhé." 
-    - Nếu không tìm thấy dữ liệu exam/không resolve được câu hỏi (tool trả về rỗng hoặc lỗi) → thông báo: "Hiện chưa tìm thấy dữ liệu tương ứng trong hệ thống. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi hoặc cung cấp exam_result_id/exam_id khác giúp mình nhé."
+    - Nếu không tìm thấy dữ liệu exam/không resolve được câu hỏi (tool trả về rỗng hoặc lỗi) → thông báo: "Hiện chưa tìm thấy dữ liệu tương ứng trong hệ thống. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi các bản cập nhật tiếp theo nhé."
 
     QUY TRÌNH:
     1) Dùng `get_exam_submission_details(exam_result_id=context.exam_result_id)` để lấy exam_id, user_id, questions, answers.

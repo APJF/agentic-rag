@@ -41,7 +41,7 @@ def initialize_learning_agent():
     
     LƯU Ý VỀ PHẠM VI:
     - Nếu yêu cầu KHÔNG liên quan đến học tiếng Nhật hoặc KHÔNG liên quan tới tài liệu hiện tại → lịch sự từ chối: "Mình chỉ hỗ trợ nội dung học tiếng Nhật và theo tài liệu được cung cấp nhé." 
-    - Nếu không tìm thấy ngữ cảnh/chunk phù hợp trong RAG (ví dụ: không có keyword người dùng nêu) → trả lời ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi hoặc cung cấp từ khóa khác/material_id khác giúp mình nhé."
+    - Nếu không tìm thấy ngữ cảnh/chunk phù hợp trong RAG (ví dụ: không có keyword người dùng nêu) → trả lời ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi các bản cập nhật tiếp theo nhé."
 
     FALLBACK:
     4) Nếu kết quả RAG rỗng nhưng skill_type gợi ý là LISTENING hoặc tài liệu là listening: GỌI `get_listening_script(material_id)` để lấy transcript/bản dịch làm ngữ cảnh trả lời (tóm tắt nội dung, trích điểm ngữ pháp xuất hiện nếu có).
