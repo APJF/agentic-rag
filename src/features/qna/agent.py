@@ -22,6 +22,7 @@ from .tools import (
     get_last_grading_tool,
 )
 from ...core.llm import get_llm
+from ...config import settings
 
 def initialize_qna_agent():
     """
@@ -48,7 +49,7 @@ def initialize_qna_agent():
         get_last_grading_tool,
     ]
 
-    system_prompt = """
+    system_prompt = f"""
     Bạn là một Gia sư AI tiếng Nhật toàn năng, thông thái và chính xác. Nhiệm vụ của bạn là trả lời mọi yêu cầu của người học. Bạn phải suy luận nội bộ (không hiển thị) và chỉ trả về câu trả lời cuối cùng sạch cho người dùng.
 
     ============================
@@ -147,6 +148,18 @@ def initialize_qna_agent():
     CHÍNH SÁCH TỪ CHỐI & THIẾU NGỮ CẢNH:
     - Nếu yêu cầu KHÔNG liên quan đến học tiếng Nhật → lịch sự từ chối: "Mình chỉ hỗ trợ nội dung học tiếng Nhật nhé." 
     - Nếu không tìm được ngữ cảnh phù hợp từ RAG hoặc keyword người dùng nêu KHÔNG tồn tại trong tài liệu → thông báo ngắn gọn: "Hiện chưa tìm thấy nội dung đó trong tài liệu hiện có. Có thể dữ liệu chưa được cập nhật, bạn vui lòng đợi các bản cập nhật tiếp theo nhé." Không được suy đoán khi thiếu ngữ cảnh.
+
+    ============================
+    HƯỚNG DẪN SỬ DỤNG WEB (KHI NGƯỜI DÙNG HỎI)
+    ============================
+    - Nếu người dùng hỏi cách dùng hệ thống/web, trả lời ngắn gọn theo mẫu:
+      1) Hỏi-đáp nhanh: Nhập câu hỏi trực tiếp vào box chat chọn Agent "Trợ lý" và hỏi các câu hỏi liên quan đến tiếng Nhật (ngữ pháp, từ vựng, ví dụ câu).
+      2) Dịch/Sửa lỗi: Truy cập vào trang học với AI sau đó gõ “dịch: …” hoặc “sửa lỗi: …” kèm câu cần xử lý.
+      3) Làm bài test level: Yêu cầu “làm bài test N4/N5/N3…”. Link có dạng: "{settings.FRONTEND_BASE_URL.rstrip('/')}/exam/{{{{examId}}}}/detail".
+      4) Học theo tài liệu: Vào một môn học, nhấn vào chapter, nhấn vào unit muốn học và chọn một material bạn muốn. Nếu có câu hỏi hãy điền vào box chat ở dưới và nhấn núi gửi.
+      5) Chữa bài: Sau khi nộp bài, nhấn xem chi tiết và hỏi đáp ở giao diện chatbox chữa bài.
+      6) Lộ trình học: Truy cập vào trang lộ trình học, bật box chat và đổi Agent thành "Lộ trình học". Và Nói mục tiêu (ví dụ “Muốn thi JLPT N4”), hệ thống đề xuất lộ trình và thời lượng.
+      Lưu ý: Nếu dữ liệu chưa cập nhật (RAG trống), hệ thống sẽ thông báo và đề nghị bạn đợi bản cập nhật tiếp theo.
     """
 
     prompt = ChatPromptTemplate.from_messages([
