@@ -251,7 +251,11 @@ async def find_session_by_context(
             raise HTTPException(status_code=404, detail="Không tìm thấy phiên phù hợp.")
         return info
 
-    raise HTTPException(status_code=400, detail="Cần truyền material_id hoặc exam_result_id.")
+    # Không có context filter: trả về phiên gần nhất theo user + type
+    info = find_session(user_id=user_id, session_type=session_type, context=None)
+    if not info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên phù hợp.")
+    return info
 
 
 @router.get("/{session_id:int}", response_model=HistoryResponse)
